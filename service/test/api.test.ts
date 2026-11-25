@@ -31,6 +31,7 @@ beforeAll(async () => {
       if (p === "/user") return users[tok] ? Response.json(users[tok]) : new Response("{}", { status: 401 });
       if (p === "/repos/alice/sample-cube") return Response.json({ full_name: "alice/sample-cube", private: false, default_branch: "main", stargazers_count: 3, owner: { login: "alice", id: 1 }, permissions: { push: users[tok]?.login === "alice" }, pushed_at: "2026-11-26T00:00:00Z" });
       if (p === "/repos/alice/sample-cube/commits/main") return new Response(head);
+      if (p === "/web/alice/sample-cube.git/info/refs") return new Response(`001e# service=git-upload-pack\n0000015b${head} HEAD\0multi_ack symref=HEAD:refs/heads/main\n003f${head} refs/heads/main\n0000`);
       if (p === "/search/repositories") return Response.json({ total_count: 1, items: [{ full_name: "alice/sample-cube", private: false, default_branch: "main", stargazers_count: 5, owner: { login: "alice", id: 1 }, pushed_at: "2026-11-26T01:00:00Z" }] });
       for (const sha of [SHA, SHA2]) {
         if (p === `/raw/alice/sample-cube/${sha}/earthrt.json`) return Response.json(manifest(title));
@@ -53,7 +54,7 @@ beforeAll(async () => {
   }
   const base = `http://127.0.0.1:${gh.port}`;
   const port = 18790 + Math.floor(Math.random() * 1000);
-  const vars = { GITHUB_API: base, GITHUB_RAW: `${base}/raw`, GITHUB_MEDIA: `${base}/media` };
+  const vars = { GITHUB_API: base, GITHUB_RAW: `${base}/raw`, GITHUB_MEDIA: `${base}/media`, GITHUB_WEB: `${base}/web` };
   const proc = Bun.spawn(
     ["node_modules/.bin/wrangler", "dev", "--env", "local", "--port", String(port), "--ip", "127.0.0.1", "--persist-to", persist, "--log-level", "warn", "--show-interactive-dev-session=false",
       ...Object.entries(vars).flatMap(([k, v]) => ["--var", `${k}:${v}`])],

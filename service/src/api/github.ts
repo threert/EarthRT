@@ -64,6 +64,17 @@ export async function headSha(env: Env, repo: string, branch: string, token?: st
   return sha;
 }
 
+/** The commit at a repository's HEAD from git's smart-HTTP ref list (no API quota: discovery runs unauthenticated). */
+export async function headShaGit(env: Env, repo: string): Promise<string> {
+  const r = await fetch(`${env.GITHUB_WEB ?? "https://github.com"}/${repo}.git/info/refs?service=git-upload-pack`, { headers: { "user-agent": `git/2.45 ${UA}` } });
+  if (!r.ok) throw new HttpError(502, `git refs of ${repo}: ${r.status}`);
+  const text = await r.text();
+  // pkt-lines: "# service=…", a flush, then "<sha> HEAD\0<capabilities>" first when the repository has a HEAD
+  const m = /([0-9a-f]{40}) HEAD\0/.exec(text);
+  if (!m) throw new HttpError(502, `git refs of ${repo}: no HEAD`);
+  return m[1];
+}
+
 export const rawUrl = (env: Env, repo: string, sha: string, path: string) => `${raw(env)}/${repo}/${sha}/${path.split("/").map(encodeURIComponent).join("/")}`;
 export const mediaUrl = (env: Env, repo: string, sha: string, path: string) => `${media(env)}/${repo}/${sha}/${path.split("/").map(encodeURIComponent).join("/")}`;
 

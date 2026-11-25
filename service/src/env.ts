@@ -14,4 +14,5 @@ export interface Env {
   GITHUB_API?: string;
   GITHUB_RAW?: string;
   GITHUB_MEDIA?: string;
+  GITHUB_WEB?: string;
 }

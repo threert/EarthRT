@@ -1,7 +1,7 @@
 // /api/v1: the places registry on D1 (SPEC § 8).
 import { validatePlace, topicOf, topicBase, placeBox, score, type PlaceManifest, type PlaceRecord } from "@earthrt/core";
 import type { Env } from "../env.ts";
-import { bearer, getRepo, headSha, HttpError, rawFile, searchTopic, whoAmI, type GhRepo, type GhUser } from "./github.ts";
+import { bearer, getRepo, headSha, headShaGit, HttpError, rawFile, searchTopic, whoAmI, type GhRepo, type GhUser } from "./github.ts";
 
 export const DISCOVERY_TOPIC = "earthrt-place";
 
@@ -198,7 +198,7 @@ export async function discover(env: Env): Promise<{ seen: number; registered: st
       if (known.results.length) await env.DB.prepare("UPDATE places SET stars = ? WHERE lower(repo) = ?").bind(repo.stargazers_count, lc).run();
       if (prev && prev.pushed === (repo.pushed_at ?? null)) continue;
       try {
-        const sha = await headSha(env, repo.full_name, repo.default_branch, env.GITHUB_TOKEN);
+        const sha = env.GITHUB_TOKEN ? await headSha(env, repo.full_name, repo.default_branch, env.GITHUB_TOKEN) : await headShaGit(env, repo.full_name);
         const paths = known.results.length ? [...new Set(known.results.map((r) => r.path))] : [""];
         for (const path of paths) {
           const row = await upsertPlace(env, repo, sha, path, { login: repo.owner.login, id: repo.owner.id }, "topic");
