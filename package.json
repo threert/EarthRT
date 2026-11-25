@@ -4,7 +4,7 @@
   "license": "MIT",
   "type": "module",
   "description": "The whole Earth, path-traced: a globe from open data, places from GitHub, in any browser and in the ThreeRT client.",
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "service"],
   "scripts": {
     "test": "bun test ./packages/core/test",
     "typecheck": "tsc -p ."

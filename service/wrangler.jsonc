@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "earthrt",
+  "account_id": "5e97b4b91f8abaf2de54de9f866bfcae",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "routes": [
+    { "pattern": "earth.threert.dev", "custom_domain": true },
+    { "pattern": "earth-files.threert.dev", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/tiles/*", "/api/*", "/api", "/p/*"]
+  },
+  "r2_buckets": [{ "binding": "TILES", "bucket_name": "earthrt-tiles" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "earthrt", "database_id": "PLACEHOLDER", "migrations_dir": "migrations" }],
+  "vars": { "APP_HOST": "earth.threert.dev", "FILES_HOST": "earth-files.threert.dev" },
+  "triggers": { "crons": ["17 * * * *"] },
+  "limits": { "cpu_ms": 30000 },
+  "observability": { "enabled": true },
+  "env": {
+    // wrangler dev --env local: no separate files host
+    "local": {
+      "vars": { "APP_HOST": "", "FILES_HOST": "" },
+      "r2_buckets": [{ "binding": "TILES", "bucket_name": "earthrt-tiles" }],
+      "d1_databases": [{ "binding": "DB", "database_name": "earthrt", "database_id": "PLACEHOLDER", "migrations_dir": "migrations" }]
+    }
+  }
+}

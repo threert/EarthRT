@@ -1,0 +1,21 @@
+{
+  "name": "@earthrt/service",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8790",
+    "deploy": "wrangler deploy",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@earthrt/core": "workspace:*",
+    "pmtiles": "^4.3.0",
+    "@mapbox/vector-tile": "^2.0.4",
+    "pbf": "^4.0.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251120.0",
+    "wrangler": "^4.50.0"
+  }
+}
