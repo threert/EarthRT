@@ -1,0 +1,9 @@
+{
+  "name": "@earthrt/core",
+  "version": "0.1.0",
+  "description": "EarthRT's shared core: geodesy, the floating frame, the tile scheme and ERT files, tile selection, request scheduling, flights, places.",
+  "license": "MIT",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "dependencies": { "earcut": "^3.2.4" }
+}

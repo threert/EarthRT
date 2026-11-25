@@ -1,0 +1,16 @@
+{
+  "name": "earthrt",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "The whole Earth, path-traced: a globe from open data, places from GitHub, in any browser and in the ThreeRT client.",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "bun test ./packages/core/test",
+    "typecheck": "tsc -p ."
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.3"
+  }
+}
