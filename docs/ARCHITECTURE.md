@@ -122,7 +122,7 @@ it replaces of the trunk inside it (e.g. the trunk's buildings), and its content
 - **`tiles`**: a city-sized tile set in the trunk's format (finer levels, z15–z18), produced by the repository's
   own generator and published as release files (GitHub Releases hold the bytes; the index mirrors them).
 
-**Registering** (`POST /api/v1/places`, or the `earthrt` topic on GitHub, which the index's hourly crawl picks up):
+**Registering** (`POST /api/v1/places`, or the `earthrt-place` topic on GitHub, which the index's hourly crawl picks up):
 the index reads `earthrt.json` at the repository's head, checks it, records the commit, and from then on serves the
 place's files at that commit from its mirror (`/p/<owner>/<repo>/<sha>/…`: GitHub is read once a file, R2 serves it
 after). A new commit is a new version of the place after a refresh (a button, a webhook, the crawl).

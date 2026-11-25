@@ -14,7 +14,7 @@ denoising.
   time anyone looks at a spot and kept after that.
 - **Places** are repositories with an `earthrt.json` at the root: where they are, how far they reach, and what they
   hold (GLB models, a ThreeRT scene module, or a city's own tiles). Register one, or give the repository the
-  `earthrt` topic, and the index pulls it in. When several people make the same city, the best liked is shown and the
+  `earthrt-place` topic, and the index pulls it in. When several people make the same city, the best liked is shown and the
   others are a click away; eras (Kyoto in the Meiji era, in the Shōwa era) are versions too.
 - **Two renderers, one core.** `packages/core` is the logic both share: geodesy, a floating frame for 32-bit GPUs,
   which tiles a view needs, how tiles are read, flights, choosing versions. `web/` draws it with three.js; `app/` is

@@ -261,5 +261,5 @@ nor anything else of the account but its login and id.
 Files: `GET /p/<owner>/<repo>/<sha>/<path>` serves the file at that commit (read from GitHub once, then from R2;
 Git LFS files followed), immutable, with the type of a model or of data, never of a page.
 
-Discovery: every hour the service searches GitHub for repositories with the topic `earthrt` and registers those whose
+Discovery: every hour the service searches GitHub for repositories with the topic `earthrt-place` and registers those whose
 `earthrt.json` passes, under the repository owner's name.
