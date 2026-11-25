@@ -189,7 +189,7 @@ At the root of a place's repository (or under the path it was registered with).
   "era": { "label": "Meiji", "year": 1900 },            // optional
   "content": [
     { "type": "glb", "uri": "models/machiya.glb", "position": [0, 0, 0], "rotation": [0, 90, 0], "scale": 1 },
-    { "type": "scene", "entry": "dist/scene.js", "source": "scene/main.ts" },
+    { "type": "scene", "entry": "dist/scene.js", "source": "scene/main.ts", "fallback": "assets/models/scene.glb" },
     { "type": "tiles", "uri": "tiles/tileset.json" }
   ],
   "start": { "position": [0, 1.6, 6], "target": [0, 1.4, 0] },   // "Go there": camera in the place's frame
@@ -204,7 +204,9 @@ At the root of a place's repository (or under the path it was registered with).
   to its `require`) whose default export is `build(ctx)`; `ctx` is `{ THREE: <@threert/scene>, place, frame,
   readFile(path): ArrayBuffer, time }`, and `build` returns an `Object3D` in the place's frame (or a promise of
   one). `source` names the TypeScript it was built from. Client only in v1; the web shows the place's `glb`
-  content and its marker.
+  content and its marker. `fallback` (optional) is a GLB of the same thing, drawn by a host that does not run scene
+  modules (the web in v1) in the scene's place; a host that runs the scene does not draw it. The place template makes
+  it from the scene module itself (`bun run bake`: its meshes, materials and lights as glTF).
 - **`tiles`**: `tileset.json` = `{ "format": "earthrt/tileset@1", "layer": "terrain" | "buildings" | "mesh",
   "zoom": [15, 18], "tiles": "tiles/{z}/{x}/{y}.{enc}.ert", "keys": ["15/29021/12970", ...] }`: ERT files as § 4,
   in ECEF (not the place's frame), drawn instead of the trunk's inside the bounds.
