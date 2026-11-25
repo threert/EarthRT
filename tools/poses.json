@@ -1,0 +1,17 @@
+{
+  "about": "Fixed views every look is judged at (docs/ROADMAP.md): live, in the client and on the web, before and after side by side. lat/lon degrees, alt metres above the ellipsoid, heading degrees clockwise from north, pitch degrees (negative looks down), time = local solar hour at the pose (UTC date 2026-06-21 unless given).",
+  "poses": [
+    { "name": "orbit-asia", "lat": 25, "lon": 120, "alt": 12000000, "heading": 0, "pitch": -90, "time": 11, "what": "the day side from far: continents, ice, sea, the atmosphere's limb" },
+    { "name": "orbit-terminator", "lat": 45, "lon": 10, "alt": 7000000, "heading": 0, "pitch": -90, "time": 19, "what": "Europe at dusk: the terminator, the night side" },
+    { "name": "kyoto-3km", "lat": 34.955, "lon": 135.76, "alt": 3000, "heading": 0, "pitch": -25, "time": 15, "what": "Kyoto from the south: the basin, the city, the hills around it" },
+    { "name": "kyoto-1km", "lat": 34.99, "lon": 135.765, "alt": 900, "heading": 20, "pitch": -30, "time": 16, "what": "central Kyoto, aeroplane-window close: buildings must read" },
+    { "name": "tokyo-1km", "lat": 35.66, "lon": 139.73, "alt": 1200, "heading": 320, "pitch": -25, "time": 15, "what": "toward Shinjuku's towers" },
+    { "name": "manhattan-2km", "lat": 40.68, "lon": -74.02, "alt": 1800, "heading": 30, "pitch": -20, "time": 17, "what": "Manhattan from the south-west, the harbour" },
+    { "name": "sf-2km", "lat": 37.79, "lon": -122.52, "alt": 2000, "heading": 75, "pitch": -18, "time": 17, "what": "the Golden Gate, the city behind it" },
+    { "name": "shanghai-1500m", "lat": 31.225, "lon": 121.475, "alt": 1500, "heading": 60, "pitch": -22, "time": 16, "what": "the Bund toward Lujiazui" },
+    { "name": "paris-1500m", "lat": 48.84, "lon": 2.27, "alt": 1500, "heading": 60, "pitch": -20, "time": 16, "what": "the Seine, the city's grain" },
+    { "name": "alps-6km", "lat": 46.1, "lon": 7.55, "alt": 6000, "heading": 200, "pitch": -15, "time": 10, "what": "relief, snow by height, rock by slope" },
+    { "name": "himalaya-9km", "lat": 27.7, "lon": 86.6, "alt": 9500, "heading": 330, "pitch": -12, "time": 9, "what": "Everest from the south" },
+    { "name": "ocean-glint", "lat": 18, "lon": -160, "alt": 25000, "heading": 270, "pitch": -20, "time": 16.5, "what": "the sun's glint on the Pacific" }
+  ]
+}
