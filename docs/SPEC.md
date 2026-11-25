@@ -199,10 +199,12 @@ At the root of a place's repository (or under the path it was registered with).
 ```
 
 - **`glb`**: `position` (m), `rotation` (Euler degrees, XYZ), `scale` (number or [x, y, z]) in the place's frame. A
-  GLB under 64 MiB; textures are its own. Shown on the web (three.js) and in the client.
+  GLB under 64 MiB; textures are its own. Shown on the web (three.js) and in the client. Units as ThreeRT reads a
+  GLB: metres, and emission (`emissiveFactor` × `KHR_materials_emissive_strength`) in nits, so a lamp is lit in the
+  client; the web scales emission by its own exposure.
 - **`scene`**: `entry` is a CommonJS bundle (`format: "cjs"`, `@threert/scene` external, which the loader passes
   to its `require`) whose default export is `build(ctx)`; `ctx` is `{ THREE: <@threert/scene>, place, frame,
-  readFile(path): ArrayBuffer, time }`, and `build` returns an `Object3D` in the place's frame (or a promise of
+  readFile(path): ArrayBuffer, time }` (`time`: the local solar time at the anchor, hours), and `build` returns an `Object3D` in the place's frame (or a promise of
   one). `source` names the TypeScript it was built from. Client only in v1; the web shows the place's `glb`
   content and its marker. `fallback` (optional) is a GLB of the same thing, drawn by a host that does not run scene
   modules (the web in v1) in the scene's place; a host that runs the scene does not draw it. The place template makes
