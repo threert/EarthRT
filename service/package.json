@@ -4,7 +4,8 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev --port 8790",
+    "assets": "bun scripts/assets.ts",
+    "dev": "bun scripts/assets.ts && wrangler d1 migrations apply earthrt --local --env local && wrangler dev --env local --port 8790",
     "deploy": "wrangler deploy",
     "test": "bun test --timeout 60000 ./test"
   },
