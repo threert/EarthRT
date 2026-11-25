@@ -160,7 +160,9 @@ export async function handleTiles(req: Request, env: Env, ctx: ExecutionContext,
     if (top) made = await topPack(env, ctx);
     else {
       const [, , layer, z, x, y, cap, enc] = m!;
-      const tk: TileKey = cap ? { cap: cap as "n" | "s" } : parseKey(`${z}/${x}/${y}`);
+      let tk: TileKey;
+      try { tk = cap ? { cap: cap as "n" | "s" } : parseKey(`${z}/${x}/${y}`); }
+      catch { return new Response("not a tile", { status: 404, headers: cors }); }
       const base = `${layer}/${cap ? `cap/${cap}` : `${z}/${x}/${y}`}`;
       if (layer === "terrain") {
         if (!cap && +z > MAX_Z) return new Response(`terrain stops at z${MAX_Z}`, { status: 404, headers: cors });

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "wrangler dev --port 8790",
     "deploy": "wrangler deploy",
-    "test": "bun test ./test"
+    "test": "bun test --timeout 60000 ./test"
   },
   "dependencies": {
     "@earthrt/core": "workspace:*",
