@@ -1,0 +1,8 @@
+{
+  "name": "@earthrt/traced",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "EarthRT's traced view: one place path-traced with its surroundings (ThreeRT)."
+}

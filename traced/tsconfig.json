@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"],
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@threert/scene": ["../engine/packages/scene/src/index.ts"],
+      "@threert/gameplay": ["../engine/packages/gameplay/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
