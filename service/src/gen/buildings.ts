@@ -155,6 +155,133 @@ function terrainSampler(compact: Uint8Array, key: { z: number; x: number; y: num
   };
 }
 
+// ------------------------------------------------------------------------------------------------- context
+
+/** What a building's surroundings say about it: the POIs inside or near it, the landuse under it. */
+type Poi = { x: number; y: number; kind: number; detail: string };
+interface Context {
+  pois: Poi[];
+  /** POIs by cell (CELL tile units square) */
+  grid: Map<number, Poi[]>;
+  worship: Poi[];
+  landuse: { kind: number; box: [number, number, number, number]; rings: P[][] }[];
+}
+
+// POI kinds → building kind
+const POI_KIND: Record<string, number> = {
+  place_of_worship: 5, hotel: 3, guest_house: 3, hostel: 3, department_store: 3, mall: 3, supermarket: 3, cinema: 3, theatre: 6,
+  school: 6, university: 6, college: 6, hospital: 6, clinic: 6, townhall: 6, library: 6, museum: 6, police: 6, fire_station: 6,
+  post_office: 6, train_station: 6, station: 6, kindergarten: 6, office: 3, bank: 3,
+};
+// landuse kinds → building kind
+const LANDUSE_KIND: Record<string, number> = {
+  industrial: 4, commercial: 3, retail: 3, school: 6, university: 6, college: 6, kindergarten: 6, hospital: 6,
+  residential: 2, railway: 6, military: 6, cemetery: 5, religious: 5,
+};
+
+function context(vt: VectorTile): Context {
+  const c: Context = { pois: [], grid: new Map(), worship: [], landuse: [] };
+  const P = vt.layers.pois;
+  if (P) for (let i = 0; i < P.length; i++) {
+    const f = P.feature(i), pr = f.properties as Record<string, unknown>;
+    const k = POI_KIND[String(pr.kind)];
+    if (k === undefined || f.type !== 1) continue;
+    const g = f.loadGeometry()[0]?.[0];
+    if (!g) continue;
+    const poi = { x: g.x, y: g.y, kind: k, detail: String(pr.kind_detail ?? pr.kind) };
+    c.pois.push(poi);
+    if (k === 5) c.worship.push(poi);
+    const cell = cellOf(g.x, g.y);
+    (c.grid.get(cell) ?? c.grid.set(cell, []).get(cell)!).push(poi);
+  }
+  const L = vt.layers.landuse;
+  if (L) for (let i = 0; i < L.length; i++) {
+    const f = L.feature(i), k = LANDUSE_KIND[String((f.properties as Record<string, unknown>).kind)];
+    if (k === undefined || f.type !== 3) continue;
+    for (const poly of classifyRings(f.loadGeometry() as never) as P[][][]) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const p of poly[0]) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+      c.landuse.push({ kind: k, box: [x0, y0, x1, y1], rings: poly });
+    }
+  }
+  return c;
+}
+
+const CELL = 128;
+const cellOf = (x: number, y: number) => (Math.floor(y / CELL) + 64) * 1024 + Math.floor(x / CELL) + 64;
+
+function inRing(ring: P[], x: number, y: number) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i], b = ring[j];
+    if (a.y > y !== b.y > y && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+const inPoly = (poly: P[][], x: number, y: number) => inRing(poly[0], x, y) && !poly.slice(1).some((h) => inRing(h, x, y));
+
+/** The kind of an untagged building: a POI inside it, a place of worship near a large one, the landuse, its size. */
+function inferKind(c: Context, poly: P[][], cx: number, cy: number, areaM2: number, unitsPerM: number, u: number): { kind: number; detail: string; inside?: boolean } {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of poly[0]) { x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y); }
+  for (let gy = Math.floor(y0 / CELL); gy <= Math.floor(y1 / CELL); gy++) for (let gx = Math.floor(x0 / CELL); gx <= Math.floor(x1 / CELL); gx++) {
+    for (const p of c.grid.get(cellOf(gx * CELL, gy * CELL)) ?? []) if (p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1 && inPoly(poly, p.x, p.y)) return { ...p, inside: true };
+  }
+  if (areaM2 > 250) {
+    // a temple's or shrine's halls: the POI sits somewhere in the precinct
+    const reach = 45 * unitsPerM;
+    for (const p of c.worship) if (Math.abs(p.x - cx) < reach && Math.abs(p.y - cy) < reach) return p;
+  }
+  for (const l of c.landuse) {
+    if (cx < l.box[0] || cx > l.box[2] || cy < l.box[1] || cy > l.box[3] || !inPoly(l.rings, cx, cy)) continue;
+    if (l.kind === 2) return { kind: areaM2 < 230 ? 1 : 2, detail: "" };
+    return { kind: l.kind, detail: "" };
+  }
+  if (areaM2 < 230) return { kind: 1, detail: "" };
+  if (areaM2 < 900) return { kind: u < 0.7 ? 2 : 3, detail: "" };
+  return { kind: u < 0.5 ? 3 : 2, detail: "" };
+}
+
+/** Japan (Kansai first): lower, denser, kawara roofs. */
+const inJapan = (lat: number, lon: number) => lat > 24 && lat < 46 && lon > 122 && lon < 146;
+
+const WALLS_JP: Record<number, RGB[]> = {
+  0: [[200, 196, 188], [176, 172, 166], [214, 208, 198]],
+  1: [[92, 70, 54], [120, 96, 74], [206, 198, 182], [182, 172, 156], [226, 222, 212], [150, 140, 128]], // machiya wood, plaster
+  2: [[222, 218, 208], [196, 192, 184], [210, 200, 184], [180, 178, 176]],
+  3: [[186, 190, 194], [160, 166, 172], [206, 204, 198], [140, 146, 154]],
+  4: [[176, 174, 168], [156, 160, 162], [196, 192, 182]],
+  5: [[150, 112, 78], [122, 88, 62], [210, 200, 182]], // temple wood and plaster
+  6: [[210, 204, 192], [190, 186, 178], [222, 216, 206]],
+  7: [[150, 168, 186], [124, 140, 160], [176, 188, 198]],
+};
+const SHRINE: RGB[] = [[196, 70, 44], [214, 92, 56]]; // vermilion
+const ROOFS_JP: Record<number, RGB[]> = {
+  0: [[128, 126, 122], [110, 110, 108]],
+  1: [[64, 66, 72], [74, 76, 82], [84, 86, 90], [96, 88, 80], [70, 80, 92]], // kawara and sheet metal
+  2: [[150, 148, 144], [130, 130, 128]],
+  3: [[136, 138, 140], [118, 120, 124], [156, 156, 152]],
+  4: [[150, 152, 154], [126, 132, 138], [110, 120, 128]],
+  5: [[56, 58, 62], [64, 66, 70], [72, 86, 80]], // temple tiles, a copper-green now and then
+  6: [[126, 124, 120], [108, 112, 112]],
+  7: [[110, 116, 122], [90, 96, 104]],
+};
+
+/** Height for an untagged building in Japan (Kyoto: two-storey machiya, height limits downtown). */
+function heightJP(kind: number, a: number, u: number): number {
+  const side = Math.sqrt(Math.max(1, a));
+  switch (kind) {
+    case 1: return 6 + u * 2.6;
+    case 2: return Math.min(31, 9 + side * 0.35 + u * 9);
+    case 3: return Math.min(45, 10 + side * 0.4 + u * 12);
+    case 4: return 7 + u * 7;
+    case 5: return Math.min(26, 7 + side * 0.28 + u * 3);
+    case 6: return Math.min(28, 10 + side * 0.15 + u * 6);
+    case 7: return 40 + u * 40;
+    default: return 7 + u * 5;
+  }
+}
+
 /**
  * The buildings of a z14 tile; null where no region covers it (the service answers 204). `terrain` gives the compact
  * terrain tile of a key (the base heights come from it, so buildings stand on the same ground the viewers draw).
@@ -176,11 +303,13 @@ export async function makeBuildingsTile(up: Upstream, key: { z: number; x: numbe
   ]) as [(lat: number, lon: number) => number, ...({ s: { x: number; y: number }; data: ArrayBuffer } | null)[]];
   const list: Building[] = [];
   const Z = 2 ** MVT_ZOOM;
+  const japan = inJapan(tileYToLat(key.y + 0.5, key.z), ((key.x + 0.5) / 2 ** key.z) * 360 - 180);
   for (const t of tiles) {
     if (!t) continue;
     const vt = new VectorTile(new Pbf(new Uint8Array(t.data)));
     const layer = vt.layers.buildings ?? vt.layers.building;
     if (!layer) continue;
+    const ctx = context(vt);
     const ext = layer.extent;
     const toLon = (px: number) => ((t.s.x + px / ext) / Z) * 360 - 180;
     const mPerUnit = (40075016.7 / Z / ext) * Math.cos((tileYToLat(t.s.y + 0.5, MVT_ZOOM) * Math.PI) / 180);
@@ -188,7 +317,8 @@ export async function makeBuildingsTile(up: Upstream, key: { z: number; x: numbe
       const feat = layer.feature(f);
       if (feat.type !== 3) continue;
       const props = feat.properties as Record<string, unknown>;
-      const rings = feat.loadGeometry().map((r) => clipRing(r, ext)).filter((r) => r.length >= 3);
+      const geom = feat.loadGeometry();
+      const rings = geom.map((r) => clipRing(r, ext)).filter((r) => r.length >= 3);
       if (!rings.length) continue;
       for (const poly of classifyRings(rings as never) as P[][][]) {
         const outer = poly[0];
@@ -197,19 +327,29 @@ export async function makeBuildingsTile(up: Upstream, key: { z: number; x: numbe
         let cx = 0, cy = 0;
         for (const p of outer) { cx += p.x; cy += p.y; }
         cx /= outer.length; cy /= outer.length;
-        const u = hash2(toLon(cx), cy / ext + t.s.y);
+        // the whole footprint (before clipping) decides the kind and the default height, so pieces agree
+        const clipped = rings.length !== geom.length || rings.some((r, i) => r.length !== geom[i].length - (geom[i][0].x === geom[i][geom[i].length - 1].x && geom[i][0].y === geom[i][geom[i].length - 1].y ? 1 : 0));
+        const src = clipped ? ((classifyRings(geom as never) as P[][][]).find((w) => inRing(w[0], cx, cy)) ?? poly) : poly;
+        let wx = 0, wy = 0;
+        for (const p of src[0]) { wx += p.x; wy += p.y; }
+        wx /= src[0].length; wy /= src[0].length;
+        const wa = Math.abs(area(src[0])) * mPerUnit * mPerUnit;
+        const u = hash2(toLon(wx), wy / ext + t.s.y);
         const kd = String(props.kind_detail ?? props["building"] ?? "");
-        let kind = KIND[kd] ?? 0;
-        const { height, minHeight } = buildingHeight(props, kind, a, u);
-        if (!kind && height > 60) kind = 7;
+        let kind = KIND[kd] ?? 0, detail = "", inside = false;
+        if (!kind) ({ kind, detail, inside = false } = inferKind(ctx, src, wx, wy, wa, 1 / mPerUnit, u));
+        let { height, minHeight } = buildingHeight(props, kind, wa, u);
+        if (japan && !(Number(props.height) > 0) && !(Number(props["building:levels"]) > 0)) height = heightJP(kind, wa, u);
+        if (kind !== 7 && height > 60) kind = 7;
         const latRings = poly.map((ring) => ring.map((p) => [tileYToLat(t.s.y + p.y / ext, MVT_ZOOM), toLon(p.x)] as [number, number]));
         let base = Infinity;
         for (const [la, lo] of latRings[0]) base = Math.min(base, ground(la, lo));
-        const u2 = hash2(u * 977, a);
-        list.push({
-          rings: latRings, base, height, minHeight, kind, roof: 0,
-          wall: pick(WALLS[kind] ?? WALLS[0], u2), roofColor: pick(ROOFS[kind] ?? ROOFS[0], hash2(u2 * 131, u)),
-        });
+        const u2 = hash2(u * 977, wa), u3 = hash2(u2 * 131, u);
+        const walls = japan ? (kind === 5 && detail === "shinto" && inside ? SHRINE : WALLS_JP[kind] ?? WALLS_JP[0]) : WALLS[kind] ?? WALLS[0];
+        const roofs = japan ? ROOFS_JP[kind] ?? ROOFS_JP[0] : ROOFS[kind] ?? ROOFS[0];
+        // roof forms for when viewers draw them (v1 draws flat): houses gabled, halls hipped
+        const roof = kind === 1 ? (u3 < 0.75 ? 1 : 2) : kind === 5 ? 2 : 0;
+        list.push({ rings: latRings, base, height, minHeight, kind, roof, wall: pick(walls, u2), roofColor: pick(roofs, u3) });
       }
     }
   }
