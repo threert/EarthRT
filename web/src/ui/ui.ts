@@ -194,7 +194,7 @@ export class Ui {
       `<span title="likes on EarthRT">♥ ${p.likes}</span>`,
       `<span title="stars on GitHub">★ ${p.stars}</span>`,
     ].join("");
-    const sceneOnly = m.content.every((c) => c.type !== "glb" && !(c.type === "scene" && c.fallback));
+    const sceneOnly = m.content.every((c) => c.type === "scene" && !c.fallback);
     const note = $("panel-note");
     note.hidden = !sceneOnly;
     note.textContent = sceneOnly ? "This place is a live scene. Open it in the EarthRT app to see it — the web shows its marker only." : "";

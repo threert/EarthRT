@@ -201,6 +201,21 @@ describe("selection", () => {
   });
 });
 
+describe("selection under a city", () => {
+  test("minZoom refines a region to a zoom whatever the error", () => {
+    const pos = geodeticToEcef(35, 135.76, 2_000_000);
+    const view = { position: pos, forward: [-pos[0] / Math.hypot(...pos), -pos[1] / Math.hypot(...pos), -pos[2] / Math.hypot(...pos)] as [number, number, number], up: [0, 0, 1] as [number, number, number], fov: 0.8, aspect: 1.5, height: 720 };
+    const info = () => ({ ready: true, minH: 0, maxH: 100 });
+    const plain = selectTiles(view, { threshold: 6, maxZoom: 14, info });
+    const kyoto = tileAt(35, 135.76, 14);
+    // the tiles that hold Kyoto's z14 tile: refined to z14
+    const holds = (k: { z: number; x: number; y: number }) => k.z <= 14 && kyoto.x >> (14 - k.z) === k.x && kyoto.y >> (14 - k.z) === k.y;
+    const forced = selectTiles(view, { threshold: 6, maxZoom: 14, info, minZoom: (k) => (holds(k) ? 14 : 0) });
+    expect(plain.show.some((k) => "z" in k && k.z === 14)).toBe(false);
+    expect(forced.show.some((k) => "z" in k && k.z === 14 && k.x === kyoto.x && k.y === kyoto.y)).toBe(true);
+  });
+});
+
 describe("scheduler", () => {
   test("highest priority first, dropped when unwanted, retried after failure", async () => {
     const started: string[] = [];

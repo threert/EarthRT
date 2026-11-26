@@ -271,10 +271,16 @@ export class App {
     const b = basis(s);
     this.globe.setCamera(s.pos, b, this.fov);
     const lookahead = this.flight.lookaheadViews();
-    const f = this.tiles.update(this.view(s), { threshold: this.sse, lookahead });
     this.places.update(s);
+    const f = this.tiles.update(this.view(s), { threshold: this.sse, lookahead, minZoom: (k) => this.places.minZoom(k) });
     this.globe.setSun(sunDirection(this.time));
     this.globe.buildingsMat.uniforms.uHoleCount.value = this.places.holes(this.globe.buildingsMat.uniforms.uHoles.value);
+    const mask = this.places.cityMask(), bu = this.globe.buildingsMat.uniforms;
+    bu.uMaskOn.value = mask ? 1 : 0;
+    if (mask) {
+      bu.uMask.value = mask.texture;
+      (bu.uMaskMatrix.value as import("three").Matrix4).copy(mask.matrix);
+    }
     this.globe.terrainMat.uniforms.uHoleCount.value = this.places.holes(this.globe.terrainMat.uniforms.uHoles.value, "terrain");
     this.globe.render(f.terrain, this.settings.buildings ? f.buildings : [], (now - this.started) / 1000);
     if (f.hole) this.holes++;

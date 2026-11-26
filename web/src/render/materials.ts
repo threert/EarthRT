@@ -221,6 +221,9 @@ ${ATMOSPHERE_LOOKUP}
 ${SHADING}
 uniform vec4 uHoles[8];      // places that replace the trunk's buildings: centre in the frame, radius (m)
 uniform int uHoleCount;
+uniform sampler2D uMask;     // a city that replaces them: its bounds polygon, over its box
+uniform mat4 uMaskMatrix;    // frame → mask uv (x, z)
+uniform float uMaskOn;
 in vec3 vWorld;
 in vec3 vNormal;
 in vec3 vColor;
@@ -232,6 +235,10 @@ void main() {
   for (int i = 0; i < 8; i++) {
     if (i >= uHoleCount) break;
     if (distance(vWorld, uHoles[i].xyz) < uHoles[i].w) discard;
+  }
+  if (uMaskOn > 0.5) {
+    vec4 q = uMaskMatrix * vec4(vWorld, 1.0);
+    if (q.x > 0.0 && q.x < 1.0 && q.z > 0.0 && q.z < 1.0 && texture(uMask, q.xz).r > 0.5) discard;
   }
   vec3 N = normalize(vNormal);
   vec3 fw3 = fwidth(vDetail);
@@ -263,6 +270,7 @@ export function buildingsMaterial(atmo: Atmosphere, noise: THREE.IUniform<THREE.
     uniforms: {
       ...atmo.uniforms, uNoise: noise, uTime: time, logDepthBufFC: { value: 1 },
       uHoles: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) }, uHoleCount: { value: 0 },
+      uMask: { value: null }, uMaskMatrix: { value: new THREE.Matrix4() }, uMaskOn: { value: 0 },
     },
   });
 }

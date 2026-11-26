@@ -76,7 +76,8 @@ export interface UpdateOptions {
   threshold: number;
   /** Extra views a flight will need soon: fetched at a lower priority, kept from eviction. */
   lookahead?: View[];
-  /** Buildings wanted from this terrain zoom when shown at it (default meta.buildings.zoom). */
+  /** A zoom the terrain must reach in a region whatever its error (under a city's tiles: SPEC § 5). */
+  minZoom?: (k: { z: number; x: number; y: number }) => number;
 }
 
 const T = (k: string) => `t:${k}`;
@@ -148,7 +149,7 @@ export class TileManager<O> {
       return e ? { ready: true, minH: e.minH, maxH: e.maxH } : undefined;
     };
     const maxZoom = this.source.meta.terrain.maxZoom;
-    const sel = selectTiles(view, { threshold: opt.threshold, maxZoom, info });
+    const sel = selectTiles(view, { threshold: opt.threshold, maxZoom, info, minZoom: opt.minZoom });
     for (const k of sel.touched) {
       const e = this.entries.get(T(k));
       if (e) e.lastUsed = this.frame;

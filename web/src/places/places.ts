@@ -4,7 +4,8 @@
 // content is not run on the web in v1: its place shows a marker and "Open in ThreeRT".
 import * as THREE from "three";
 import { serviceUrl } from "../host.ts";
-import { chooseVersions, ecefToGeodetic, geodeticToEcef, haversine, placeFrame, placeRadius, topicBase, VISIBLE_FROM, type PlaceManifest, type PlaceRecord } from "@earthrt/core";
+import { CityTiles } from "./city.ts";
+import { validateTileset, type Tileset, chooseVersions, ecefToGeodetic, geodeticToEcef, haversine, placeFrame, placeRadius, topicBase, VISIBLE_FROM, type PlaceManifest, type PlaceRecord } from "@earthrt/core";
 import { centerTarget, geodetic, type CamState } from "../camera/math.ts";
 import type { App } from "../main.ts";
 
@@ -21,6 +22,8 @@ export interface Loaded {
   groundZoom: number;
   bytes: number;
   error?: string;
+  /** A city's own tiles (SPEC § 5 `tiles`). */
+  city?: CityTiles;
 }
 
 export function loadChoice(storage: Pick<Storage, "getItem"> | undefined = globalThis.localStorage): Record<string, string> {
@@ -200,7 +203,8 @@ export class Places {
       this.rechoose();
       if (first) {
         this.app.ui.showPlace(this.dev);
-        this.goTo(this.dev);
+        // (a page opened at a pose stays there)
+        if (!this.app.launch.at) this.goTo(this.dev);
         this.watchDev(dir);
       }
     } catch (e) {
@@ -272,7 +276,53 @@ export class Places {
       l.group.position.set(...t.position);
       l.group.quaternion.set(...t.quaternion);
       l.group.visible = true;
+      l.group.updateMatrixWorld(true);
+      if (l.city) this.updateCity(l, f, s);
     }
+  }
+
+  private readonly frustum = new THREE.Frustum();
+  private readonly projView = new THREE.Matrix4();
+  private readonly sphere = new THREE.Sphere();
+
+  /** A city's tiles this frame: the camera in the place's frame, the view's frustum for their spheres. */
+  private updateCity(l: Loaded, f: ReturnType<typeof placeFrame>, s: CamState) {
+    const cam = this.app.globe.camera;
+    this.projView.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    this.frustum.setFromProjectionMatrix(this.projView);
+    const mw = l.group.matrixWorld;
+    const visible = (c: [number, number, number], r: number) => {
+      this.sphere.center.set(c[0], c[1], c[2]).applyMatrix4(mw);
+      this.sphere.radius = r;
+      return this.frustum.intersectsSphere(this.sphere);
+    };
+    const { h } = this.app.size;
+    l.city!.update(f.point(s.pos), (this.app.fov * Math.PI) / 180, h, this.app.sse, visible);
+  }
+
+  /** The zoom the trunk's terrain must reach at a tile: a city's ground zoom under its shown tiles (SPEC § 5). */
+  minZoom(k: { z: number; x: number; y: number }): number {
+    let z = 0;
+    for (const l of this.loaded.values()) if (l.city) z = Math.max(z, l.city.minZoom(k));
+    return z;
+  }
+
+  /** The city whose tiles show (the buildings' mask): its mask texture and the matrix from the frame to mask uv. */
+  cityMask(): { texture: THREE.Texture; matrix: THREE.Matrix4 } | null {
+    for (const l of this.loaded.values()) {
+      const c = l.city;
+      if (!c || !c.shown || !l.record.manifest.replaces?.includes("buildings")) continue;
+      const m = (c as CityTiles & { _mask?: ReturnType<CityTiles["mask"]> })._mask ??= c.mask();
+      // frame → place frame (the group's inverse), then x, z → uv over the polygon's box
+      const toUv = new THREE.Matrix4().set(
+        1 / (m.x1 - m.x0), 0, 0, -m.x0 / (m.x1 - m.x0),
+        0, 0, 0, 0,
+        0, 0, 1 / (m.z1 - m.z0), -m.z0 / (m.z1 - m.z0),
+        0, 0, 0, 1,
+      );
+      return { texture: m.texture, matrix: toUv.multiply(l.group.matrixWorld.clone().invert()) };
+    }
+    return null;
   }
 
   private load(p: PlaceRecord): Loaded {
@@ -285,11 +335,14 @@ export class Places {
     // GLB content, and scene content's fallback GLB (the web runs no scene modules): placed by its own transform or none
     const glbs = p.manifest.content.flatMap((c) =>
       c.type === "glb" ? [c] : c.type === "scene" && c.fallback ? [{ type: "glb" as const, uri: c.fallback }] : []);
-    if (!glbs.length) {
+    const tiles = p.manifest.content.find((c) => c.type === "tiles");
+    if (!glbs.length && !tiles) {
       l.state = "none";
       return l;
     }
     this.loader ??= import("three/examples/jsm/loaders/GLTFLoader.js").then(({ GLTFLoader }) => new GLTFLoader());
+    if (tiles) this.loadCity(p, l, tiles.uri);
+    if (!glbs.length) return l;
     this.loader.then(async (loader) => {
       for (const c of glbs) {
         if (c.type !== "glb") continue;
@@ -323,7 +376,31 @@ export class Places {
     return l;
   }
 
+  /** A city's tileset.json (its tiles come as the view asks). */
+  private async loadCity(p: PlaceRecord, l: Loaded, uri: string) {
+    try {
+      const url = new URL(uri, p.files).href;
+      const ts = (await fetch(url + (p.sha === "dev" ? `?v=${this.devVersion}` : "")).then((r) => {
+        if (!r.ok) throw new Error(`${r.status} ${url}`);
+        return r.json();
+      })) as Tileset;
+      const problems = validateTileset(ts);
+      if (problems.length) throw new Error(`tileset.json: ${problems.slice(0, 3).join("; ")}`);
+      if (this.loaded.get(p.id) !== l) return;
+      const app = this.app;
+      const budget = () => (app.settings.quality === "app" ? 900 : app.mobile ? 150 : 320) << 20;
+      l.city = new CityTiles(p.manifest, ts, url, p.files, this.loader!, placeFrame(p.manifest, 0), budget);
+      l.group.add(l.city.group);
+      l.state = "ready";
+    } catch (e) {
+      l.state = "failed";
+      l.error = String((e as Error)?.message ?? e);
+      console.warn("city", p.id, e);
+    }
+  }
+
   private unload(l: Loaded) {
+    l.city?.dispose();
     this.loaded.delete(l.record.id);
     l.group.removeFromParent();
     l.group.traverse((x) => {
@@ -342,7 +419,7 @@ export class Places {
     let n = 0;
     for (const l of this.loaded.values()) {
       const m = l.record.manifest;
-      if ((layer === "buildings" && !m.replaces?.includes("buildings")) || l.state !== "ready" || n >= out.length) continue;
+      if ((layer === "buildings" && !m.replaces?.includes("buildings")) || l.state !== "ready" || l.city || n >= out.length) continue;
       const c = this.app.globe.origin.frame.point(geodeticToEcef(m.anchor.lat, m.anchor.lon, l.ground));
       out[n++].set(c[0], c[1], c[2], placeRadius(m));
     }
@@ -364,6 +441,13 @@ export class Places {
       best = best === undefined ? d : Math.min(best, d);
     }
     return best;
+  }
+
+  /** What is still loading: places' content and cities' tiles (the shots' and the probe's settle). */
+  pending(): number {
+    let n = 0;
+    for (const l of this.loaded.values()) n += (l.state === "loading" ? 1 : 0) + (l.city?.stats().loading ?? 0);
+    return n;
   }
 
   /** Markers: every chosen place (and the dev place) with where it is. */

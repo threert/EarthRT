@@ -34,7 +34,7 @@ export async function settle(page: Page, timeoutMs = 90_000, quietMs = 1200) {
   let quietSince = 0;
   for (;;) {
     const s = await page.evaluate<{ inFlight: number; queued: number; up: number }>(
-      "(() => { const s = earth.tiles.stats; return { inFlight: s.inFlight, queued: s.queued, up: earth.tiles.arrivedCount ?? 0 }; })()",
+      "(() => { const s = earth.tiles.stats; return { inFlight: s.inFlight + (earth.places.pending ? earth.places.pending() : 0), queued: s.queued, up: 0 }; })()",
     );
     if (s.inFlight === 0 && s.queued === 0) {
       quietSince ||= Date.now();
@@ -60,7 +60,7 @@ async function shoot(page: Page, pose: Pose, file: string) {
   await Bun.sleep(pose.settle ?? 400);
   mkdirSync(dirname(file), { recursive: true });
   await page.screenshot(file);
-  const s = await page.evaluate<Record<string, number>>("(() => { const s = earth.tiles.stats; return { shown: s.shown, gpuMB: s.gpuBytes / 1048576, netMB: s.netBytes / 1048576, requests: s.requests, holes: earth.holes }; })()");
+  const s = await page.evaluate<Record<string, unknown>>("(() => { const s = earth.tiles.stats; const c = [...earth.places.loaded.values()].filter(l => l.city).map(l => l.city.stats()); return { shown: s.shown, gpuMB: Math.round(s.gpuBytes / 1048576), netMB: Math.round(s.netBytes / 1048576), requests: s.requests, holes: earth.holes, city: c[0] }; })()");
   console.log(`  ${pose.name}: ${file}  ${JSON.stringify(s)}`);
 }
 
