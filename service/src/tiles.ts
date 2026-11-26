@@ -8,13 +8,14 @@ import { WorkerUpstream } from "./worker-upstream.ts";
 import type { Env } from "./env.ts";
 
 /** The generation of the generator: bump when what tiles hold changes (SPEC § 3). */
-export const GEN = "g3";
+export const GEN = "g4";
 export const MAX_Z = 14;
 /** The top pack: z0 … this and the caps (z2 too would be 315 KB with brotli). */
 export const TOP_MAX_Z = 1;
 
 export const ATTRIBUTION = [
   "Terrain: Mapzen Terrain Tiles on AWS (SRTM, GMTED, ETOPO1, NED and others; https://github.com/tilezen/joerd/blob/master/docs/attribution.md)",
+  "Terrain in Japan: Geospatial Information Authority of Japan (GSI tiles, 国土地理院 標高タイル)",
   "Land cover: © ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium (CC BY 4.0)",
   "Buildings: © OpenStreetMap contributors (ODbL), via Protomaps",
 ];

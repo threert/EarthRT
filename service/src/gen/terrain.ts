@@ -38,6 +38,35 @@ export function lakeOf(lat: number, lon: number) {
 }
 
 /** Terrarium tile → heights in metres (256 × 256), null where the tile is missing. */
+/** Japan's GSI DEM (10 m, "dem_png", z ≤ 14; numerical value × 0.01 m, 2²³ = no data): finer than Terrarium there. */
+export const GSI = "https://cyberjapandata.gsi.go.jp/xyz/dem_png";
+const GSI_MIN_Z = 8;
+const inGsi = (z: number, x: number, y: number) => {
+  if (z < GSI_MIN_Z || z > 14) return false;
+  const w = (x / 2 ** z) * 360 - 180, e = ((x + 1) / 2 ** z) * 360 - 180, n = tileYToLat(y, z), s = tileYToLat(y + 1, z);
+  return e > 122 && w < 154 && n > 20 && s < 46;
+};
+
+/** Heights of a source tile (256²): Terrarium, with GSI's pixels where it has data. `used` collects source names. */
+export async function sourceHeights(up: Upstream, z: number, x: number, y: number, used?: Set<string>): Promise<Float32Array | null> {
+  const [t, g] = await Promise.all([terrariumHeights(up, z, x, y), inGsi(z, x, y) ? up.get(`${GSI}/${z}/${x}/${y}.png`) : Promise.resolve(null)]);
+  if (t) used?.add("terrarium");
+  if (!t || !g) return t;
+  let img;
+  try { img = await decodePng(g); } catch { return t; }
+  if (img.width !== 256 || img.height !== 256) return t;
+  const d = img.data, c = img.channels;
+  let any = false;
+  for (let i = 0; i < 256 * 256; i++) {
+    const v = d[i * c] * 65536 + d[i * c + 1] * 256 + d[i * c + 2];
+    if (v === 8388608) continue;
+    t[i] = (v < 8388608 ? v : v - 16777216) * 0.01;
+    any = true;
+  }
+  if (any) used?.add("gsi");
+  return t;
+}
+
 export async function terrariumHeights(up: Upstream, z: number, x: number, y: number): Promise<Float32Array | null> {
   const png = await up.get(`${TERRARIUM}/${z}/${x}/${y}.png`);
   if (!png) return null;
@@ -73,9 +102,10 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
   const wrapX = (tx: number) => ((tx % tiles) + tiles) % tiles;
   const clampY = (ty: number) => Math.max(0, Math.min(tiles - 1, ty));
   const want = new Map<string, Promise<Float32Array | null>>();
+  const used = new Set<string>();
   for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
     const tx = wrapX(x + dx), ty = clampY(y + dy), k = `${tx}/${ty}`;
-    if (!want.has(k)) want.set(k, terrariumHeights(up, z, tx, ty));
+    if (!want.has(k)) want.set(k, sourceHeights(up, z, tx, ty, used));
   }
   const got = new Map<string, Float32Array | null>();
   await Promise.all([...want].map(async ([k, p]) => got.set(k, await p)));
@@ -187,7 +217,7 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       }
     }
   }
-  const src = ["terrarium", ...(lc ? lc.src : [])];
+  const src = [...(used.size ? used : ["terrarium"]), ...(lc ? lc.src : [])];
   const out = encodeTerrainCompact({ key, n, heights, cls, rgb, water, normals, skirt: skirtFor(key, n), src });
   if (timings) { timings.fetch = t1 - t0; timings.landcover = t2 - t1; timings.build = Date.now() - t2; }
   return out;
