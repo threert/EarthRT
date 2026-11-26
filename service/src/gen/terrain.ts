@@ -15,6 +15,8 @@ import { albedo, CLS, seaIce, worldCoverClass } from "./albedo.ts";
 export const TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
 export const TERRARIUM_MAX_Z = 15;
 export const N = 65;
+/** The finest Terrarium zoom with open-sea bathymetry. */
+const BATHY_Z = 10;
 
 /** Land cover at points: ESA WorldCover values (10 … 100), 0 where there is none (the open sea, no data). */
 export interface LandCover {
@@ -127,6 +129,37 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       elev[r * W + c] = t[py * 256 + px];
     }
   }
+  // Terrarium has no bathymetry past z10 in the open sea (its tiles are all 0 m there): a pixel at exactly 0 m that
+  // is not land takes the depth of its z10 ancestor (bilinear), so it stays sea and as deep as the parent says
+  const filled: number[] = [];
+  if (z > BATHY_Z) {
+    const f = 2 ** (z - BATHY_Z), anc = new Map<string, Promise<Float32Array | null>>();
+    const need: number[] = [];
+    for (let i = 0; i < W * W; i++) if (elev[i] === 0) need.push(i);
+    if (need.length) {
+      const n10 = 2 ** BATHY_Z, px10 = n10 * 256;
+      const at = (gx: number, gy: number) => {
+        gx = ((gx % px10) + px10) % px10; gy = Math.max(0, Math.min(px10 - 1, gy));
+        const k = `${gx >> 8}/${gy >> 8}`;
+        return { k, i: (gy & 255) * 256 + (gx & 255) };
+      };
+      const samples = need.map((p) => {
+        const r = p / W | 0, c = p % W;
+        const gx = ((x * 256 + lo + c + 0.5) / f) - 0.5, gy = ((y * 256 + lo + r + 0.5) / f) - 0.5;
+        const x0 = Math.floor(gx), y0 = Math.floor(gy), tx = gx - x0, ty = gy - y0;
+        const pts = [at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1)];
+        for (const q of pts) if (!anc.has(q.k)) { const [ax, ay] = q.k.split("/").map(Number); anc.set(q.k, terrariumHeights(up, BATHY_Z, ax, ay)); }
+        return { p, pts, w: [(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty] };
+      });
+      const got = new Map<string, Float32Array | null>();
+      await Promise.all([...anc].map(async ([k, pr]) => got.set(k, await pr)));
+      for (const sm of samples) {
+        let v = 0;
+        for (let q = 0; q < 4; q++) v += (got.get(sm.pts[q].k)?.[sm.pts[q].i] ?? 0) * sm.w[q];
+        if (v < 0) { elev[sm.p] = v; filled.push(sm.p); }
+      }
+    }
+  }
   // the pixels' centres
   const rowLat = new Float64Array(W), colLon = new Float64Array(W);
   for (let r = 0; r < W; r++) rowLat[r] = tileYToLat(y + (lo + r + 0.5) / 256, z);
@@ -147,6 +180,8 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
     }
     cover = any ? await lc.sample(lons, lats, 360 / tiles / 256, only) : new Uint8Array(W * W);
   }
+  // a filled pixel the land cover calls land was land at 0 m after all
+  if (cover) for (const p of filled) if (cover[p] !== 0 && cover[p] !== 80) elev[p] = 0;
   const t2 = Date.now();
   // per pixel: is it water, and the surface height
   const isWater = new Uint8Array(W * W), surf = new Float32Array(W * W);
