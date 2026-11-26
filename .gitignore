@@ -6,3 +6,7 @@ out/
 .dev.vars
 service/public/
 web/dist/
+native/.build/
+native/core/target/
+native/macos/*.xcodeproj
+xcuserdata/

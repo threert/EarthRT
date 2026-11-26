@@ -1,0 +1,16 @@
+{
+  "name": "earthrt-sidecar",
+  "private": true,
+  "type": "module",
+  "description": "The EarthRT app's sidecar: place projects, the coding agent's bridge (ACP), GitHub, Meshy, the earthrt command line",
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "2.7.0",
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14"
+  }
+}
