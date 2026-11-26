@@ -38,14 +38,17 @@ follows it. Version numbers are in every format, so an old client meets a new se
   tiles that border them.
 - **Grid**: `n × n` vertices (`n = 65` in v1), uniform in Mercator x and y, row 0 the north edge, column 0 the west
   edge; the outer rows and columns are shared with the neighbours (same positions). Each tile has a **skirt**: its
-  perimeter again, `skirt` metres lower, so cracks between tiles of different levels are hidden.
+  perimeter again, `skirt` metres lower, so cracks between tiles of different levels are hidden. The skirt's depth is
+  the tile's own (its header's `skirt`): `min(1.5 · spacing, 3000) + spacing² / (4 · 6371 km)` (height steps between
+  levels, and the chord's sag over a cell, which is kilometres at z0).
 - **Refinement**: a tile is replaced by its four children when the view asks for more detail (SSE, below) and all four
   are loaded; until then the parent shows.
 - **Screen-space error**: a tile's geometric error is `size / (n − 1) · 1.5`, `size` its width in metres at its centre's
   latitude; it is refined while `error · viewportHeight / (2 · distance · tan(fov / 2))` exceeds the host's
   threshold (web 2.5 px, client 2 px; settings may scale it).
 - **Buildings**: one tile per z14 terrain tile (`meta.buildings.zoom`), shown while that terrain tile or a child of it
-  shows. A building is in the tile of its centroid.
+  shows. A building is in the tile of its centroid; in v1 a building that crosses a tile edge is cut at the edge into
+  pieces that abut (the source's vector tiles are cut that way).
 
 ## 3. Tile addresses
 
@@ -53,7 +56,7 @@ All under the service host (`https://earth.threert.dev` in v1).
 
 | address | what | cache |
 | --- | --- | --- |
-| `/tiles/v1/meta.json` | `{ v, gen, terrain: { maxZoom, n, skirt }, buildings: { zoom, regions: [{ name, bbox }] }, attribution: [..] }` | 5 min |
+| `/tiles/v1/meta.json` | `{ v, gen, terrain: { maxZoom, n, skirt }, buildings: { zoom, regions: [{ name, bbox }] }, attribution: [..] }` (`skirt` is a maxZoom tile's; each tile's header has its own; `bbox` is `[west, south, east, north]`) | 5 min |
 | `/tiles/v1/<gen>/terrain/<z>/<x>/<y>.<enc>.ert` | a terrain tile, `enc` = `c` (compact) or `x` (expanded) | immutable |
 | `/tiles/v1/<gen>/terrain/cap/<n\|s>.<enc>.ert` | a polar cap | immutable |
 | `/tiles/v1/<gen>/terrain/top.c.erp` | z0–z2 compact, packed (21 tiles + 2 caps) | immutable |
@@ -262,7 +265,15 @@ nor anything else of the account but its login and id.
 | `PUT` / `DELETE /places/<owner>/<repo>/<id>/like` | like, unlike (any signed-in GitHub account) |
 | `GET /me` | who the token is |
 
-Files: `GET /p/<owner>/<repo>/<sha>/<path>` serves the file at that commit (read from GitHub once, then from R2;
+A place in a response is core's `PlaceRecord` plus `path` (the manifest's directory in the repository), `score`
+(`likes × 2 + stars`), `rank` (1 = its topic's default), `source` (`api` or `topic`) and `created`. Errors are
+`{ error, problems? }` with 400 (bad request), 401 (no token, or GitHub does not know it), 403 (no push access), 404,
+409 (the id is registered from another path of the repository) or 422 (no `earthrt.json`, or it does not pass
+`validatePlace`: `problems` lists why).
+
+Files: on the files host (`https://earth-files.threert.dev` in v1, never the app's origin; `/p/…` on the app's host
+redirects there), `GET /p/<owner>/<repo>/<sha>/<path>` serves the file at a commit a place was registered at (others
+404) (read from GitHub once, then from R2;
 Git LFS files followed), immutable, with the type of a model or of data, never of a page.
 
 Discovery: every hour the service searches GitHub for repositories with the topic `earthrt-place` and registers those whose
