@@ -19,7 +19,7 @@ export class MemoUpstream implements Upstream {
   private size = 0;
   constructor(private inner: Upstream, private budget = 48 << 20) {}
 
-  private remember(key: string, make: () => Promise<Uint8Array | null>) {
+  private remember(key: string, make: () => Promise<Uint8Array | null>, keepNull = true) {
     const hit = this.memo.get(key);
     if (hit) {
       this.memo.delete(key);
@@ -28,6 +28,7 @@ export class MemoUpstream implements Upstream {
     }
     const p = make().then(
       (v) => {
+        if (v === null && !keepNull) this.memo.delete(key);
         this.size += v?.byteLength ?? 0;
         while (this.size > this.budget && this.memo.size > 1) {
           const [k, old] = this.memo.entries().next().value!;
@@ -47,8 +48,9 @@ export class MemoUpstream implements Upstream {
 
   get(url: string) { return this.remember(`g ${url}`, () => this.inner.get(url)); }
   range(url: string, start: number, length: number) { return this.remember(`r ${url} ${start} ${length}`, () => this.inner.range(url, start, length)); }
-  getObject(key: string) { return this.remember(`o ${key}`, () => this.inner.getObject(key)); }
-  getObjectRange(key: string, start: number, length: number) { return this.remember(`or ${key} ${start} ${length}`, () => this.inner.getObjectRange(key, start, length)); }
+  // our own objects may appear later (an upload): a miss is not remembered
+  getObject(key: string) { return this.remember(`o ${key}`, () => this.inner.getObject(key), false); }
+  getObjectRange(key: string, start: number, length: number) { return this.remember(`or ${key} ${start} ${length}`, () => this.inner.getObjectRange(key, start, length), false); }
   putObject(key: string, bytes: Uint8Array, contentType?: string) { return this.inner.putObject?.(key, bytes, contentType) ?? Promise.resolve(); }
 }
 
