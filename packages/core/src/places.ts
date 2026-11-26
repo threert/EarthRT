@@ -100,7 +100,9 @@ export function validatePlace(m: unknown): string[] {
       if (s.source !== undefined && !isRel(s.source)) e.push(`content[${i}].source: a relative path`);
       if (s.fallback !== undefined && (!isRel(s.fallback) || !/\.glb$/i.test(s.fallback))) e.push(`content[${i}].fallback: a relative path to a .glb`);
     } else if (t === "tiles") {
-      if (!isRel((c as TilesContent).uri)) e.push(`content[${i}].uri: a relative path to tileset.json`);
+      if (!isRel((c as TilesContent).uri) || !/\.json$/i.test((c as TilesContent).uri)) e.push(`content[${i}].uri: a relative path to tileset.json`);
+      // tiles are in the place's frame, on the ellipsoid (their own heights are the terrain's)
+      if (o.anchor && (o.anchor.heightRef !== "ellipsoid" || (o.anchor.height ?? 0) !== 0 || (o.anchor.heading ?? 0) !== 0)) e.push(`content[${i}]: a place with tiles is anchored on the ellipsoid: anchor.heightRef "ellipsoid", height 0, heading 0`);
     } else e.push(`content[${i}].type: "glb", "scene" or "tiles"`);
   });
   if (o.start !== undefined && !(Array.isArray(o.start.position) && Array.isArray(o.start.target))) e.push("start: { position, target }");

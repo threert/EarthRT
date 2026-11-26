@@ -3,7 +3,7 @@ import {
   chooseVersions, decodeErp, decodeErt, encodeBuildingsCompact, encodeErp, encodeErt, encodeTerrainCompact, ecefToGeodetic, expandBuildings,
   expandTerrain, encodeTerrainExpanded, readTerrainExpanded, Flight, FloatingOrigin, Frame, geodeticToEcef, gridLatLon, gridNormals, haversine,
   latToTileY, octDecode, octEncode, parseKey, keyOf, selectTiles, Scheduler, sunDirection, terrainIndex, tileAt, tileBounds, tileCenter, tileYToLat,
-  validatePlace, type PlaceRecord, type V3,
+  validatePlace, validateTileset, selectCityTiles, type PlaceRecord, type Tileset, type V3,
 } from "../src/index.ts";
 
 const close = (a: number, b: number, eps: number) => expect(Math.abs(a - b)).toBeLessThan(eps);
@@ -268,5 +268,38 @@ describe("enterFrom", () => {
     expect(validatePlace({ ...ok, enterFrom: 60 })).toEqual([]);
     expect(validatePlace({ ...ok, enterFrom: -1 }).length).toBe(1);
     expect(ENTER_FROM.interior).toBe(80);
+  });
+});
+
+describe("city tiles (tileset@2)", () => {
+  const ts: Tileset = {
+    format: "earthrt/tileset@2",
+    frame: "place",
+    root: ["13/0/0"],
+    materials: { wall: { roughness: 0.8 } },
+    tiles: [
+      { key: "13/0/0", uri: "tiles/13/0/0.glb", center: [0, 0, 0], radius: 3000, error: 8, children: ["15/0/0", "15/1/0"] },
+      { key: "15/0/0", uri: "tiles/15/0/0.glb", center: [-500, 0, 0], radius: 700, error: 0.6 },
+      { key: "15/1/0", uri: "@release/v1/15-1-0.glb", center: [500, 0, 0], radius: 700, error: 0.6 },
+    ],
+  };
+  test("a valid tileset passes; problems are named", () => {
+    expect(validateTileset(ts)).toEqual([]);
+    expect(validateTileset({ ...ts, root: ["13/9/9"] })).toEqual(["root: 13/9/9 is not a tile"]);
+    expect(validateTileset({ ...ts, tiles: [{ ...ts.tiles[0], uri: "../x.glb", children: [] }] }).length).toBe(1);
+  });
+  test("far: the root; near: its children once they are in", () => {
+    const far = selectCityTiles(ts, { position: [0, 20000, 0], fov: Math.PI / 4, height: 720, sse: 2 });
+    expect(far.show.map((t) => t.key)).toEqual(["13/0/0"]);
+    const near = selectCityTiles(ts, { position: [0, 800, 0], fov: Math.PI / 4, height: 720, sse: 2 });
+    expect(near.show.map((t) => t.key).sort()).toEqual(["15/0/0", "15/1/0"]);
+    const loading = selectCityTiles(ts, { position: [0, 800, 0], fov: Math.PI / 4, height: 720, sse: 2 }, (k) => k !== "15/1/0");
+    expect(loading.show.map((t) => t.key)).toEqual(["13/0/0"]);
+    expect(loading.want.map((t) => t.key)).toEqual(["15/1/0"]);
+  });
+  test("a place with tiles is anchored on the ellipsoid", () => {
+    const m = { format: "earthrt/place@1", id: "kyoto", title: "Kyoto", kind: "city", anchor: { lat: 35, lon: 135.76, heightRef: "ellipsoid", height: 0 }, bounds: { radius: 9000 }, content: [{ type: "tiles", uri: "tiles/tileset.json" }] };
+    expect(validatePlace(m)).toEqual([]);
+    expect(validatePlace({ ...m, anchor: { lat: 35, lon: 135.76 } }).length).toBe(1);
   });
 });

@@ -214,9 +214,54 @@ At the root of a place's repository (or under the path it was registered with).
   content and its marker. `fallback` (optional) is a GLB of the same thing, drawn by a host that does not run scene
   modules (the web in v1) in the scene's place; a host that runs the scene does not draw it. The place template makes
   it from the scene module itself (`bun run bake`: its meshes, materials and lights as glTF).
-- **`tiles`**: `tileset.json` = `{ "format": "earthrt/tileset@1", "layer": "terrain" | "buildings" | "mesh",
-  "zoom": [15, 18], "tiles": "tiles/{z}/{x}/{y}.{enc}.ert", "keys": ["15/29021/12970", ...] }`: ERT files as § 4,
-  in ECEF (not the place's frame), drawn instead of the trunk's inside the bounds.
+- **`tiles`**: a city's own tiles, drawn by both renderers (the map engine from the air, the traced view at street
+  level): `uri` names a `tileset.json` (below). The place is anchored on the ellipsoid (`heightRef: "ellipsoid"`,
+  `height: 0`, `heading: 0`): the tiles are in its frame and their heights are the terrain's own. Inside the bounds
+  they replace the trunk's layers in `replaces`; the trunk's terrain stays and is shown at `ground.zoom` under a
+  shown tile (the tiles are draped on that terrain's triangles). Checked by `validateTileset` (core); shown by
+  `selectCityTiles` (core).
+
+```jsonc
+{
+  "format": "earthrt/tileset@2",
+  "frame": "place",                                  // tiles in the place's frame (§ 1: x east, y up, z south, m)
+  "ground": { "layer": "terrain", "gen": "g6", "zoom": 14 },   // the trunk terrain the tiles stand on
+  "levels": [{ "zoom": 13, "error": 8 }, { "zoom": 15, "error": 0.6 }],
+  "root": ["13/7185/3243", "…"],                     // the coarsest tiles
+  "materials": {                                     // every material the GLBs name (below)
+    "roof-tile": { "roughness": 0.42, "metalness": 0.12, "doubleSided": true, "note": "kawara" },
+    "facade": { "roughness": 0.7, "surface": { "windows": { "floorHeight": 3.3, "bayWidth": 3.6 } } },
+    "water": { "roughness": 0.04, "surface": { "water": true } }
+  },
+  "tiles": [
+    { "key": "13/7185/3243", "uri": "tiles/13/7185/3243.glb", "center": [-1520.4, 40.2, 2310.8], "radius": 3204.1,
+      "error": 8, "bytes": 4120334, "tris": 160221, "instances": 61022, "children": ["15/28740/12972", "…"] },
+    { "key": "15/28740/12972", "uri": "@release/v0.1.0/15-28740-12972.glb", "center": ["…"], "radius": 801.3, "error": 0.6 }
+  ]
+}
+```
+
+  - **Tiles** are a quadtree of Web Mercator keys (`z/x/y`, § 2) at the levels listed; a tile's `center` and `radius`
+    bound its content in the place's frame; `error` is the geometric error in metres. **Refinement replaces**: a
+    host shows a tile, or, when `error · viewportHeight / (2 · distance · tan(fov / 2))` exceeds its threshold
+    (§ 2) and the tile has `children`, all of its children once each is loaded (`distance` from the camera to the
+    bounding sphere). A key's children may be any finer level; a child that holds nothing is not listed.
+  - **A tile is a GLB** (glTF 2.0, under 64 MiB; a finest-level tile is meant to stay under ~4 MB) in the place's
+    frame:
+    - *meshes* of the tile's own (buildings that are not copies, temples, ground: roads, water, parks): one primitive
+      a material, `POSITION`, `COLOR_0` (linear; normalized unsigned bytes or floats), `TEXCOORD_0` only where the
+      material uses it (walls: metres along and up), indices. **No `NORMAL`** on flat-shaded meshes: the host makes
+      the faces' normals (glTF: "flat normals" when `NORMAL` is absent), so a box's corners are one vertex each.
+    - *copies* of repeated pieces (houses' walls and roofs, rooftop plant, trees): a node a piece, its mesh with
+      `NORMAL` (and optionally `COLOR_0`, multiplied by the copy's colour), its copies by `EXT_mesh_gpu_instancing`
+      (`TRANSLATION`, `ROTATION` (floats or normalized shorts), `SCALE`, `_COLOR_0`: linear float RGB). A piece's
+      unit space is stretched by `SCALE` (a roof's one piece serves every size and pitch).
+    - *materials* are named (the tileset's `materials` lists them), metallic-roughness with a white base colour (the
+      colour is the vertices' or the copies'); `extras.earthrt` repeats the material's `surface`: what a host may add
+      by the name (the traced view: ThreeRT material functions such as `SurfaceMaterial` windows on `facade`, its
+      water and foliage; the map engine: its own shaders, or the plain PBR values).
+  - `uri` is relative to tileset.json, or a published GitHub release's asset, `@release/<tag>/<asset>` (§ 8), so a
+    city's bytes need not be in git.
 - Paths are relative to the manifest; no `..`, no absolute paths, no URLs (everything comes through the mirror).
 - The index refuses a manifest that does not pass `validatePlace` (core).
 
@@ -331,7 +376,10 @@ A place in a response is core's `PlaceRecord` plus `path` (the manifest's direct
 Files: on the files host (`https://earth-files.threert.dev` in v1, never the app's origin; `/p/…` on the app's host
 redirects there), `GET /p/<owner>/<repo>/<sha>/<path>` serves the file at a commit a place was registered at (others
 404) (read from GitHub once, then from R2;
-Git LFS files followed), immutable, with the type of a model or of data, never of a page.
+Git LFS files followed), immutable, with the type of a model or of data, never of a page. `@release/<tag>/<asset>` as the path is a file of a published GitHub release of the repository (for content too big
+for git, e.g. a city's tiles): read from `https://github.com/<owner>/<repo>/releases/download/<tag>/<asset>` once,
+then served from R2 like any other mirrored file. The registered commit pins the tileset that names the tag; a tag's
+assets are not to change after a commit naming them is registered (the mirror keeps the first bytes it read).
 
 Discovery: every hour the service searches GitHub for repositories with the topic `earthrt-place` and registers those whose
 `earthrt.json` passes, under the repository owner's name.
