@@ -218,6 +218,14 @@ describe("scheduler", () => {
     expect(got.map((g) => g.id).sort()).toEqual(["a", "b"]);
     expect(got.find((g) => g.id === "b")!.result).toBe("B");
   });
+  test("a finished request is not started again before the next want()", async () => {
+    let n = 0;
+    const s = new Scheduler<string>({ get: (url) => { n++; return Promise.resolve(url); } }, 4);
+    s.want([{ id: "a", url: "a", priority: 1 }]);
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(n).toBe(1);
+    expect(s.take().map((g) => g.id)).toEqual(["a"]);
+  });
 });
 
 describe("flight, sun, places", () => {

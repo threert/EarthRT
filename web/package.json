@@ -1,0 +1,19 @@
+{
+  "name": "@earthrt/web",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "EarthRT's web engine: the globe in three.js (WebGL2), orbit to the aeroplane view, places, flights.",
+  "scripts": {
+    "build": "bun tools/build.ts",
+    "dev": "bun tools/serve.ts --watch",
+    "test": "bun test ./test"
+  },
+  "dependencies": {
+    "@earthrt/core": "workspace:*",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0"
+  }
+}

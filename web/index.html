@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>EarthRT — the whole Earth</title>
+<meta name="description" content="The whole Earth in your browser, from orbit to the aeroplane window: open data, places anyone makes on GitHub. Path-traced in ThreeRT.">
+<meta name="theme-color" content="#05070b">
+<meta property="og:title" content="EarthRT">
+<meta property="og:description" content="The whole Earth, path-traced: a globe from open data, places from GitHub.">
+<link rel="preload" href="/tiles/v1/meta.json" as="fetch" crossorigin>
+<!--MODULEPRELOAD-->
+<script>
+// Boot (inline, before anything else): ask for the tiles' meta and the globe's top levels now, while the app's code
+// is still on its way. The app picks these promises up from window.__ert.
+(function () {
+  var q = new URLSearchParams(location.search), api = (q.get("api") || "").replace(/\/+$/, "");
+  if (!/^https?:\/\//.test(api)) api = "";
+  if (q.get("tiles") === "dev") api = "#";
+  var t0 = performance.now();
+  if (api && api !== "#") {
+    var l = document.createElement("link"); l.rel = "preconnect"; l.href = api; l.crossOrigin = ""; document.head.appendChild(l);
+  }
+  var none = Promise.resolve(null);
+  var meta = api === "#" ? none : fetch(api + "/tiles/v1/meta.json", { priority: "high" }).then(function (r) {
+    var ct = r.headers.get("content-type") || "";
+    return r.ok && ct.indexOf("json") >= 0 ? r.json() : null;
+  }).catch(function () { return null; });
+  var top = meta.then(function (m) {
+    if (!m || !m.gen) return null;
+    return fetch(api + "/tiles/v1/" + m.gen + "/terrain/top.c.erp", { priority: "high" }).then(function (r) { return r.ok ? r.arrayBuffer() : null; });
+  }).catch(function () { return null; });
+  window.__ert = { t0: t0, meta: meta, top: top, api: api === "#" ? "" : api };
+})();
+</script>
+<style>
+:root {
+  --fg: #eef2f7; --dim: #9aa7b8; --glass: rgba(14, 18, 26, 0.72); --line: rgba(255, 255, 255, 0.1); --accent: #8fd3ff;
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--fg); font: 14px/1.4 var(--font); -webkit-font-smoothing: antialiased; }
+canvas#globe { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; outline: none; cursor: grab; }
+canvas#globe:active { cursor: grabbing; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+.glass { background: var(--glass); backdrop-filter: blur(14px) saturate(1.3); -webkit-backdrop-filter: blur(14px) saturate(1.3); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.35); }
+[hidden] { display: none !important; }
+
+#veil { position: fixed; inset: 0; display: grid; place-items: center; pointer-events: none; transition: opacity .8s ease; }
+#veil b { font-weight: 600; letter-spacing: .32em; font-size: 13px; color: var(--dim); text-transform: uppercase; }
+.ready #veil { opacity: 0; }
+#veil.failed b::after { content: " — WebGL2 is needed"; }
+
+#top { position: fixed; top: max(12px, env(safe-area-inset-top)); left: 12px; right: 12px; display: flex; gap: 8px; align-items: flex-start; pointer-events: none; }
+#top > * { pointer-events: auto; }
+#brand { padding: 9px 12px; font-weight: 650; letter-spacing: .02em; white-space: nowrap; }
+#brand span { color: var(--accent); }
+#searchbox { position: relative; flex: 0 1 340px; }
+#search { width: 100%; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); outline: none; }
+#search:focus { border-color: rgba(143, 211, 255, .5); }
+#results { position: absolute; top: calc(100% + 6px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; max-height: 50vh; overflow: auto; }
+#results li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+#results li:hover { background: rgba(255,255,255,.07); }
+#results li span { color: var(--dim); font-size: 12px; }
+#actions { margin-left: auto; display: flex; gap: 8px; }
+.btn { padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); white-space: nowrap; }
+.btn:hover { border-color: rgba(255,255,255,.25); }
+.btn.primary { background: rgba(143, 211, 255, .16); border-color: rgba(143, 211, 255, .35); }
+
+#destinations { position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 46px); left: 12px; display: flex; flex-wrap: wrap; gap: 6px; max-width: min(560px, calc(100vw - 24px)); }
+#destinations button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: rgba(14,18,26,.5); color: var(--dim); font-size: 12px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+#destinations button:hover { color: var(--fg); }
+.flying #destinations { display: none; }
+
+#fly-form { position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 50px); right: 12px; padding: 12px; display: grid; gap: 8px; width: 280px; }
+#fly-form label { display: grid; gap: 4px; font-size: 12px; color: var(--dim); }
+#fly-form input { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: rgba(0,0,0,.25); outline: none; }
+
+#panel { position: fixed; top: calc(max(12px, env(safe-area-inset-top)) + 50px); right: 12px; width: min(360px, calc(100vw - 24px)); max-height: calc(100vh - 140px); overflow: auto; padding: 16px; }
+#panel h2 { margin: 0 28px 4px 0; font-size: 18px; font-weight: 650; line-height: 1.25; }
+#panel-close { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 8px; border: 0; background: transparent; color: var(--dim); font-size: 18px; }
+#panel-summary { margin: 0 0 10px; color: var(--dim); }
+#panel-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; font-size: 13px; margin-bottom: 12px; }
+#panel-meta a { color: var(--accent); text-decoration: none; }
+.chip { padding: 1px 8px; border-radius: 999px; background: rgba(255,255,255,.08); font-size: 12px; text-transform: capitalize; }
+#panel-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+#panel-note { padding: 8px 10px; border-radius: 8px; background: rgba(143,211,255,.08); color: var(--accent); font-size: 13px; margin-bottom: 12px; }
+#panel h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--dim); margin: 12px 0 6px; font-weight: 600; }
+#panel-eras { display: flex; gap: 6px; flex-wrap: wrap; }
+#panel-eras button { padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); background: transparent; font-size: 12px; }
+#panel-eras button.on { background: rgba(143,211,255,.18); border-color: rgba(143,211,255,.4); }
+#panel-versions { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+#panel-versions li { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.04); }
+#panel-versions li.on { background: rgba(143,211,255,.1); }
+#panel-versions li span { grid-column: 1; color: var(--dim); font-size: 12px; }
+#panel-versions li button { grid-row: 1 / span 2; grid-column: 2; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: transparent; font-size: 12px; }
+#panel-versions li.muted { background: none; color: var(--dim); display: block; }
+#panel-credits { margin-top: 12px; color: var(--dim); font-size: 11px; }
+
+#markers { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+.marker { position: absolute; left: 0; top: 0; pointer-events: auto; display: flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; transform-origin: 0 0; white-space: nowrap; }
+.marker i { display: block; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px rgba(143,211,255,.25), 0 1px 6px rgba(0,0,0,.6); }
+.marker span { margin-top: -6px; padding: 2px 8px; border-radius: 6px; background: rgba(10,14,20,.7); font-size: 12px; opacity: 0; transition: opacity .2s; }
+.marker:hover span, .marker.near span { opacity: 1; }
+.marker.loading i { animation: pulse 1s infinite alternate; }
+@keyframes pulse { to { box-shadow: 0 0 0 7px rgba(143,211,255,.1), 0 1px 6px rgba(0,0,0,.6); } }
+
+#flight { position: fixed; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 26px); transform: translateX(-50%); width: min(560px, calc(100vw - 24px)); padding: 12px 14px; display: grid; gap: 8px; }
+#flight .row { display: flex; align-items: center; gap: 10px; }
+#fly-route { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#fly-info { color: var(--dim); font-size: 12px; flex: 1; }
+#flight .track { height: 4px; border-radius: 2px; background: rgba(255,255,255,.12); overflow: hidden; }
+#fly-bar { height: 100%; width: 0; background: var(--accent); }
+#flight .btn { padding: 4px 10px; font-size: 12px; border-radius: 8px; }
+#flight .hint { color: var(--dim); font-size: 11px; }
+
+#bottom { position: fixed; left: 12px; right: 12px; bottom: max(8px, env(safe-area-inset-bottom)); display: flex; align-items: flex-end; gap: 12px; pointer-events: none; }
+#attribution { font-size: 10.5px; color: rgba(255,255,255,.55); text-shadow: 0 1px 2px #000; flex: 1; min-width: 0; }
+#readout { font-size: 11.5px; color: rgba(255,255,255,.75); text-shadow: 0 1px 2px #000; font-variant-numeric: tabular-nums; white-space: nowrap; }
+#timebox { pointer-events: auto; display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; }
+#time { width: 130px; accent-color: var(--accent); }
+#time-label { font-variant-numeric: tabular-nums; color: var(--dim); white-space: nowrap; min-width: 92px; }
+#time-now { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: transparent; font-size: 11px; }
+
+#toast { position: fixed; left: 50%; top: 70px; transform: translateX(-50%); padding: 10px 14px; }
+#debug { position: fixed; left: 12px; bottom: 40px; padding: 8px 10px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; pointer-events: none; }
+
+@media (max-width: 640px) {
+  #brand { display: none; }
+  #actions .wide { display: none; }
+  #destinations { top: calc(max(12px, env(safe-area-inset-top)) + 46px); }
+  #panel { top: auto; bottom: 64px; max-height: 55vh; }
+  #bottom { flex-wrap: wrap; }
+  #attribution { order: 3; flex-basis: 100%; }
+  #time { width: 90px; }
+}
+</style>
+</head>
+<body>
+<canvas id="globe" tabindex="0" aria-label="The globe: drag to turn, scroll or pinch to zoom, right-drag or two fingers to tilt"></canvas>
+<div id="markers"></div>
+<div id="veil"><b>EarthRT</b></div>
+
+<div id="top">
+  <div id="brand" class="glass">Earth<span>RT</span></div>
+  <div id="searchbox">
+    <input id="search" type="search" placeholder="Search places, cities or lat, lon" autocomplete="off" spellcheck="false" aria-label="Search">
+    <ul id="results" class="glass" hidden></ul>
+  </div>
+  <div id="actions">
+    <button id="fly-open" class="btn">Fly</button>
+    <button id="open-threert" class="btn primary">Open in ThreeRT</button>
+  </div>
+</div>
+<div id="destinations"></div>
+
+<form id="fly-form" class="glass" hidden>
+  <label>From <input id="fly-from" placeholder="Here, a city, a place, or lat, lon" value="Here"></label>
+  <label>To <input id="fly-to" placeholder="San Francisco" list="dest-list"></label>
+  <datalist id="dest-list"><option>Kyoto</option><option>Tokyo</option><option>New York</option><option>Shanghai</option><option>San Francisco</option><option>Paris</option><option>London</option></datalist>
+  <button class="btn primary" type="submit">Take off</button>
+</form>
+
+<section id="panel" class="glass" hidden>
+  <button id="panel-close" aria-label="Close">×</button>
+  <h2 id="panel-title"></h2>
+  <p id="panel-summary"></p>
+  <div id="panel-meta"></div>
+  <div id="panel-note" hidden></div>
+  <div id="panel-actions">
+    <button id="panel-go" class="btn primary">Go there</button>
+    <button id="panel-fly" class="btn">Fly there</button>
+    <button id="panel-threert" class="btn">Open in ThreeRT</button>
+  </div>
+  <div id="panel-eras" hidden></div>
+  <h3>Versions</h3>
+  <ul id="panel-versions"></ul>
+  <div id="panel-credits"></div>
+</section>
+
+<section id="flight" class="glass" hidden>
+  <div class="row"><span id="fly-route"></span><button id="fly-speed" class="btn">1×</button><button id="fly-pause" class="btn">Pause</button><button id="fly-stop" class="btn">Land</button></div>
+  <div class="track"><div id="fly-bar"></div></div>
+  <div class="row"><span id="fly-info"></span><span class="hint">Drag to look around</span></div>
+</section>
+
+<div id="bottom">
+  <div id="attribution"></div>
+  <span id="readout"></span>
+  <div id="timebox" class="glass"><span aria-hidden="true">☀︎</span><input id="time" type="range" min="0" max="24" step="0.05" aria-label="Time of day"><span id="time-label"></span><button id="time-now" hidden>Now</button></div>
+</div>
+<div id="toast" class="glass" hidden></div>
+<pre id="debug" class="glass" hidden></pre>
+<!--MAIN-->
+</body>
+</html>
