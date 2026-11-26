@@ -119,6 +119,8 @@ enum TestHooks {
             "github": model.github?.login ?? NSNull(),
             "traced": model.traced, "entering": model.entering ?? NSNull(), "tracedFatal": model.tracedFatal ?? NSNull(),
             "near": model.near?.id ?? NSNull(), "mapFrameMs": model.mapFrameMs,
+            "tasks": model.tasks.values.sorted { $0.id < $1.id }.suffix(6).map { ["id": $0.id, "kind": $0.kind, "state": $0.state, "error": $0.error ?? NSNull(), "lines": Array($0.lines.suffix(4))] as [String: Any] },
+            "sidecar": model.sidecarStatus,
         ]
     }
 

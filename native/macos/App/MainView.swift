@@ -178,7 +178,7 @@ struct GlobeView: View {
                 }
                 Spacer()
                 if let entering = model.entering { EnteringCard(id: entering) }
-                else if !model.traced, let near = model.near, model.ready { NearCard(id: near.id) }
+                else if !model.traced, let near = model.near, model.ready, model.flight.state != "flying" { NearCard(id: near.id) }
                 else if !model.traced, let pick = model.pick, model.ready { PickCard(pick: pick) }
                 StatusBar()
             }
@@ -260,7 +260,7 @@ struct TracedBar: View {
         HStack(spacing: 12) {
             Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 1) {
-                Text(model.record?.title ?? model.project?.title ?? "Path-traced").font(.headline)
+                Text(model.enteredTitle ?? "Path-traced").font(.headline)
                 Text("Every light traced by ThreeRT · drag to look, W A S D to walk, Esc to leave").font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 20)
@@ -403,7 +403,6 @@ struct FlightPicker: View {
     private func end(_ id: String) -> Any? {
         if id == "here" { return nil }
         // (The globe knows these cities by name and titles the flight with it; others go as points with a title.)
-        if City.named.contains(id) { return id }
         if let c = City.all.first(where: { $0.id == id }) { return ["lat": c.lat, "lon": c.lon, "alt": 1500, "title": c.name] as [String: Any] }
         return id
     }

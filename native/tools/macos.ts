@@ -2,6 +2,11 @@
 // inside), the Xcode project (xcodegen) and the app. Shaped like threert/native-app-template's tools/macos.ts.
 //
 //   bun native/tools/macos.ts [--run] [--open <earthrt://…>] [--no-core] [--no-bundle] [--debug]
+//                             [--web <dist>] [--traced <traced.js>] [--out <dir>]
+//
+// --web / --traced: the map engine's build and the traced view's script from elsewhere (another branch's work copy),
+// carried inside the app; --out: a copy of the built app there (e.g. out/), which keeps working when this checkout
+// is rebuilt.
 //
 // Prints the .app. --run quits a copy that runs and opens the new one (--open: with a link, as a click on the web's
 // "Open in EarthRT" would). Needs Rust (rustup: the engine pins its toolchain), Xcode 16+, xcodegen
@@ -55,7 +60,18 @@ if (build.exitCode !== 0) {
   console.error(text.split("\n").filter(line => /error:|BUILD FAILED/.test(line)).slice(0, 40).join("\n"));
   process.exit(1);
 }
-const app = join(native, `.build/xcode/Build/Products/${configuration}/EarthRT.app`);
+let app = join(native, `.build/xcode/Build/Products/${configuration}/EarthRT.app`);
+// Builds from elsewhere, carried in the app (Paths.swift reads Resources/web and Resources/traced when the checkout has none).
+const web = flag("--web"), traced = flag("--traced");
+if (web) await $`rm -rf ${join(app, "Contents/Resources/web")} && ditto ${web} ${join(app, "Contents/Resources/web")}`;
+if (traced) await $`mkdir -p ${join(app, "Contents/Resources/traced")} && cp ${traced} ${join(app, "Contents/Resources/traced/traced.js")}`;
+if (web || traced) await $`codesign --force --sign - ${app}`.quiet();
+const outDir = flag("--out");
+if (outDir) {
+  const copy = join(resolve(outDir), "EarthRT.app");
+  await $`rm -rf ${copy} && ditto ${app} ${copy}`;
+  app = copy;
+}
 console.log(app);
 if (args.includes("--run") || flag("--open")) {
   // One copy at a time: two would share the sidecar's server file and the asset root.

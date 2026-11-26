@@ -68,8 +68,9 @@ struct PlacePanel: View {
             Button { model.gotoPlace(id) } label: { Label("Go There", systemImage: "location") }
             if !id.hasPrefix("dev/") {
                 Button { model.toggleLike(id) } label: {
-                    Label(model.liked.contains(id) ? "Liked" : "Like", systemImage: model.liked.contains(id) ? "heart.fill" : "heart")
+                    Image(systemName: model.liked.contains(id) ? "heart.fill" : "heart")
                 }
+                .help(model.liked.contains(id) ? "Unlike" : "Like this version")
                 if let repo = model.record?.repo {
                     Menu {
                         Button("Open Repository on GitHub") { model.openRepository(repo) }
@@ -78,8 +79,8 @@ struct PlacePanel: View {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString("earthrt://open?place=\(id)", forType: .string)
                         }
-                    } label: { Label("More", systemImage: "ellipsis.circle") }
-                    .menuStyle(.borderlessButton).fixedSize()
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).fixedSize().help("More")
                 }
             }
         }
@@ -166,7 +167,7 @@ struct CreatePanel: View {
                     }
                     HStack(spacing: 8) {
                         Button { model.enter("dev/\(p.id)") } label: { Label("Enter", systemImage: "sparkles") }.buttonStyle(.borderedProminent).help("See it path-traced")
-                        Button { model.gotoPlace("dev/\(p.id)") } label: { Label("Go There", systemImage: "location") }
+                        Button { model.gotoPlace(model.devPlaceID ?? "dev/\(p.id)") } label: { Label("Go There", systemImage: "location") }
                         Button { model.inspector = .agent } label: { Label("Ask the Agent", systemImage: "sparkles") }
                         Menu {
                             Button("Show in Finder") { model.revealProject() }

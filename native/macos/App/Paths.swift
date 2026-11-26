@@ -23,6 +23,8 @@ enum Paths {
         if let env = ProcessInfo.processInfo.environment["EARTHRT_BUNDLE"], !env.isEmpty { return env }
         // (A developer's override: `defaults write dev.threert.earthrt EarthRTTraced <file>`.)
         if let d = UserDefaults.standard.string(forKey: "EarthRTTraced"), !d.isEmpty { return d }
+        let carried = (Bundle.main.resourcePath ?? "") + "/traced/traced.js"
+        if !FileManager.default.fileExists(atPath: root + "/traced/dist/traced.js"), FileManager.default.fileExists(atPath: carried) { return carried }
         return root + "/traced/dist/traced.js"
     }
     /// The map engine's build (web/dist), loaded by the WKWebView as ert://app/.
@@ -30,6 +32,9 @@ enum Paths {
         if let env = ProcessInfo.processInfo.environment["EARTHRT_WEB"], !env.isEmpty { return env }
         // (A developer's override: `defaults write dev.threert.earthrt EarthRTWeb <dist folder>`.)
         if let d = UserDefaults.standard.string(forKey: "EarthRTWeb"), !d.isEmpty { return d }
+        // (A build that carries its own copy: native/tools/macos.ts --out.)
+        let carried = (Bundle.main.resourcePath ?? "") + "/web"
+        if !FileManager.default.fileExists(atPath: root + "/web/dist/index.html"), FileManager.default.fileExists(atPath: carried + "/index.html") { return carried }
         return root + "/web/dist"
     }
     static var presets: String { root + "/engine/presets" }

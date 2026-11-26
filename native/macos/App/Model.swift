@@ -200,6 +200,8 @@ final class Model: ObservableObject {
     @Published var tracedLoading = (done: 0, total: 0)
     @Published var tracedFatal: String?
     private var tracedStarted = false
+    /// The title of the place entered (the traced view's bar).
+    @Published var enteredTitle: String?
     private var tracedPlace: String?
 
     // The interface
@@ -326,6 +328,7 @@ final class Model: ObservableObject {
     func enter(_ id: String) {
         guard startTraced() else { return }
         entering = id
+        enteredTitle = id.hasPrefix("dev/") ? project?.title : (nearby.first(where: { $0.id == id })?.title ?? (record?.id == id ? record?.title : nil))
         tracedLoading = (0, 0)
         if id.hasPrefix("dev/"), let p = project, let path = tracedDevPath {
             tracedSend(["t": "traced.open", "dev": ["path": path, "manifest": p.manifest], "camera": cameraJSON, "utc": camera.utc])
@@ -356,6 +359,13 @@ final class Model: ObservableObject {
             self.view.pause(true)
         }
     }
+
+    /// The map's id for the open project's place ("dev/…/<id>").
+    var devPlaceID: String? {
+        guard let p = project else { return nil }
+        return nearby.first(where: { $0.id.hasPrefix("dev/") && $0.id.hasSuffix("/" + p.id) })?.id ?? "dev/\(p.id)"
+    }
+    private var flownTo: String?
 
     /// The traced view's link to the open project (dev mode).
     private var tracedDevPath: String?
@@ -397,7 +407,16 @@ final class Model: ObservableObject {
         if let from { m["from"] = from }
         send(m)
         showFlight = false
+        near = nil
+        // (The names the flight card shows, if the map does not say them.)
+        let name = { (x: Any?) -> String in
+            if let d = x as? [String: Any] { return d["title"] as? String ?? String(format: "%.2f, %.2f", d["lat"] as? Double ?? 0, d["lon"] as? Double ?? 0) }
+            if let id = x as? String { return City.all.first(where: { $0.id == id })?.name ?? self.nearby.first(where: { $0.id == id })?.title ?? id }
+            return "Here"
+        }
+        flightNames = (name(from), name(to))
     }
+    private var flightNames = ("", "")
 
     func stopFlight() { send(["t": "earth.stop"]) }
 
@@ -807,7 +826,15 @@ final class Model: ObservableObject {
         if inTraced {
             tracedSend(["t": "traced.open", "dev": ["path": path, "manifest": manifest], "camera": cameraJSON, "utc": camera.utc])
         }
-        loadWatch = (seq, "dev/\(p.id)", Date(), [], inTraced)
+        loadWatch = (seq, p.id, Date(), [], inTraced)
+        // The first build of a place opened: go to it (the map loads it when the camera is in its visibleFrom).
+        if flownTo != p.folder {
+            flownTo = p.folder
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, let id = self.devPlaceID else { return }
+                self.send(["t": "earth.gotoPlace", "id": id])
+            }
+        }
         addLine(level: "info", source: "place", text: "built \(p.name) (#\(seq), \(buildMs) ms): reloading it \(inTraced ? "in the traced view" : "on the map")")
         DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
             guard let self, let w = self.loadWatch, w.seq == seq else { return }
@@ -943,7 +970,8 @@ final class Model: ObservableObject {
                                    lat: (a?["lat"] as? NSNumber)?.doubleValue ?? 0, lon: (a?["lon"] as? NSNumber)?.doubleValue ?? 0,
                                    chosen: j["chosen"] as? Bool ?? false, loaded: j["loaded"] as? Bool ?? false)
             }
-            if let w = loadWatch, !w.traced, let dev = nearby.first(where: { $0.id == w.id }), dev.loaded {
+            if let n = near, !nearby.contains(where: { $0.id == n.id }) { near = nil }
+            if let w = loadWatch, !w.traced, let dev = nearby.first(where: { $0.id.hasPrefix("dev/") && ($0.id == "dev/" + w.id || $0.id.hasSuffix("/" + w.id)) }), dev.loaded {
                 loadWatch = nil
                 placeLoaded = true
                 sidecarSend("runtime.place", ["seq": w.seq, "loaded": true, "errors": w.errors, "view": "map"])
@@ -963,15 +991,15 @@ final class Model: ObservableObject {
             pick = Pick(lat: lat, lon: lon, h: (p["h"] as? NSNumber)?.doubleValue ?? 0, place: p["place"] as? String, building: p["building"] as? String)
             if let place = p["place"] as? String { select(place) }
         case "earth.near":
-            if let id = p["id"] as? String { near = (id, (p["distance"] as? NSNumber)?.doubleValue ?? 0) } else { near = nil }
+            if let id = p["id"] as? String, flight.state != "flying" { near = (id, (p["distance"] as? NSNumber)?.doubleValue ?? 0) } else { near = nil }
         case "earth.flight":
             var f = Flight()
             f.state = p["state"] as? String ?? "idle"
             f.seconds = ((p["seconds"] ?? p["t_"] ?? p["time"]) as? NSNumber)?.doubleValue ?? (p["elapsed"] as? NSNumber)?.doubleValue ?? 0
             f.duration = (p["duration"] as? NSNumber)?.doubleValue ?? 0
             let title = { (x: Any?) -> String in (x as? [String: Any])?["title"] as? String ?? (x as? String) ?? "" }
-            f.from = title(p["from"])
-            f.to = title(p["to"])
+            f.from = title(p["from"]).isEmpty ? flightNames.0 : title(p["from"])
+            f.to = title(p["to"]).isEmpty ? flightNames.1 : title(p["to"])
             f.paused = p["paused"] as? Bool ?? false
             f.speedup = (p["speedup"] as? NSNumber)?.doubleValue ?? 1
             flight = f
@@ -1033,7 +1061,7 @@ final class Model: ObservableObject {
             return
         }
         if traced && onMap { exitTraced() }
-        send(["t": "earth.gotoPlace", "id": "dev/\(p.id)"])
+        send(["t": "earth.gotoPlace", "id": devPlaceID ?? "dev/\(p.id)"])
         DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
             guard let self else { return }
             // The camera in the place's frame, as a pose (the ground under the anchor from the map's earth.view).
