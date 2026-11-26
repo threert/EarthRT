@@ -4,8 +4,8 @@ EarthRT is a whole-Earth viewer built on [ThreeRT](https://github.com/meshy-dev/
 covers every place on Earth down to the view from an aeroplane window. Cities, sites and rooms in finer detail are
 **places**: each one a GitHub repository, registered at a spot on the map, pulled in by the index, and chosen among
 when several people made the same city. A web page at the project's domain shows the globe in any browser; the
-ThreeRT client shows the same globe path-traced (every light traced, MetalFX or DLSS Ray Reconstruction as the
-denoiser) and is where places are made.
+**EarthRT app**, a native app of its own (macOS first), shows the same globe path-traced (every light traced, MetalFX
+or DLSS Ray Reconstruction as the denoiser) and is where places are made.
 
 This document is the design and the reasons for it. The contracts the pieces share (frames, tiles, the place
 manifest, the API, the host messages) are in [SPEC.md](SPEC.md); what is built and what comes next is in
@@ -19,16 +19,16 @@ manifest, the API, the host messages) are in [SPEC.md](SPEC.md); what is built a
   │   scene.ts / tiles       │            │ /p/…      repo files at a commit, mirrored into R2       │
   │ first-party cities       │            │ /tiles/v1 the trunk: terrain + land cover + buildings,   │
   │   threert/earth-<city>   │            │           made on first request from open data, kept     │
-  └──────────────────────────┘            │ /         the web app, and the ThreeRT package           │
+  └──────────────────────────┘            │ /         the web app, the native app's downloads      │
                                           └───────────────▲───────────────────────────▲─────────────┘
   open data: Mapzen/AWS terrain tiles,                    │                           │
   ESA WorldCover, OSM (Protomaps), …  ───────────────────▶│                           │
                                                           │ https                     │ https (assets.fetch)
                                    ┌──────────────────────┴───────┐   ┌───────────────┴──────────────────────┐
-                                   │ web engine (three.js)        │   │ ThreeRT client (macOS, iOS, Windows,  │
-                                   │ raster, WebGPU or WebGL2     │   │ Linux/Deck, Android): EarthRT package │
-                                   │ workers decode, LRU, cache   │   │ path-traced, MetalFX / DLSS-RR,       │
-                                   │ GLB places, fly, pick        │   │ disk cache, offline flights, Remix    │
+                                   │ web engine (three.js)        │   │ EarthRT app (native: SwiftUI on macOS │
+                                   │ raster, WebGPU or WebGL2     │   │ first, iOS and Windows later): ThreeRT│
+                                   │ workers decode, LRU, cache   │   │ path-traced, MetalFX / DLSS-RR, disk  │
+                                   │ GLB places, fly, pick        │   │ cache, flights, making places + agent │
                                    └──────────────┬───────────────┘   └───────────────┬───────────────────────┘
                                                   └─────────── @earthrt/core ─────────┘
                                   geodesy, the floating frame, tile selection, request scheduling, tile codec,
@@ -43,10 +43,11 @@ The globe's logic is written once (`packages/core`, plain TypeScript with no DOM
 a view needs, in what order to fetch them, how a tile's bytes become vertex arrays, where everything sits relative
 to the camera, how a flight moves, which version of a place to show. Two hosts draw it:
 
-- **The ThreeRT client** runs `app/`, a ThreeRT package (a game in ThreeRT's sense: `defineGame`, `@threert/scene`).
-  Its script runs in the engine's QuickJS; it turns tiles into `Mesh`es and places into `GLTFModel`s or scene
-  modules, and the engine traces them. This is where the picture is best: path tracing, the sky's own atmosphere,
-  water that reflects it, the client's Graphics menu (MetalFX denoising on Apple GPUs, DLSS-RR on NVIDIA).
+- **The EarthRT app** (`native/`) embeds ThreeRT and runs `app/`, the globe's scene script (a game in ThreeRT's
+  sense: `defineGame`, `@threert/scene`), in the engine's QuickJS; the script turns tiles into `Mesh`es and places
+  into `GLTFModel`s or scene modules, and the engine traces them. This is where the picture is best: path tracing,
+  the sky's own atmosphere, water that reflects it, the app's Graphics settings (MetalFX denoising on Apple GPUs,
+  DLSS-RR on NVIDIA when there is a Windows app).
 - **The web engine** (`web/`) is three.js, written for this app and not ThreeRT's generic three.js view: the
   generic view maps ThreeRT materials one for one, and a globe needs its own shaders (an atmosphere seen from orbit,
   a logarithmic depth range from 1 m to 40,000 km, water) and its own loading (below). It draws the same tiles and
@@ -54,14 +55,25 @@ to the camera, how a flight moves, which version of a place to show. Two hosts d
 
 Why not the engine's own wasm build in the browser: WebGPU has no ray-tracing hardware, the engine's software
 traversal pays a scene rebuild on every streamed tile, and WebGPU is not in every browser. The web is the open door
-(fast first picture, any device), the client is the upgrade. The same address opens both: the page offers "Open in
-ThreeRT" (`threerts://<host>/`), as every ThreeRT package does.
+(fast first picture, any device), the app is the upgrade. The page offers "Open in EarthRT" (`earthrt://…`, the same
+view; SPEC § 7) and the app's download.
 
-Why the ThreeRT client and not a separate native app: the client already is the native app on five platforms, with
-the renderer's Graphics settings, input, HUD, sockets, files and the Remix flow that starts the user's own Claude
-Code or Codex on a project. EarthRT adds one generic host family to it (`assets.fetch`, binary files into the
-package's cache, SPEC § 6) and nothing EarthRT-specific. A branded EarthRT app, if wanted later, is the client
-opening this package at start.
+### 1a. The native app is EarthRT's own (decided by the user, 2026-11-26)
+
+Not a package inside the ThreeRT client: EarthRT is its own product, with its own icon, window and native interface.
+It has the shape of [threert/native-app-template](https://github.com/threert/native-app-template) (ThreeRT's
+recommended way to embed the engine), in `native/`:
+
+| part | what |
+| --- | --- |
+| `native/core` | Rust static library: ThreeRT's `LiveCore` and a game session running `app/`'s bundled script; the host channel answered natively (`assets.fetch` into the app's disk cache, `net.fetch`, input, the `earth.*` family: SPEC § 6); a small C ABI (`ert_*`) |
+| `native/macos` | SwiftUI: the globe view on a `CAMetalLayer`; search; the place panel (versions ranked, eras, likes); flights; time of day; offline downloads; Graphics (quality, denoiser: MetalFX or ThreeRT's); GitHub sign-in; Create, Remix and Publish; the Meshy panel; the agent panel |
+| `native/sidecar` | Bun: the agent bridge (ACP, as in the template: the user's own Claude Code or Codex in a side panel, on their own quota), building a place's scene module on save, Meshy and GitHub calls for making places |
+
+The interface over the picture is the app's own (SwiftUI), not the engine's HUD: the globe script reports what it
+shows (`earth.view`, `earth.places`, `earth.selected`, …) and the app sends what the user asks (`earth.goto`,
+`earth.choose`, `earth.fly`, …). macOS first; iOS shares the SwiftUI; a Windows app (DLSS-RR) follows the same
+core. Distribution: a Developer ID signed and notarised download from the project's site, updates by Sparkle.
 
 ### 2. Coordinates: ECEF in doubles, a floating local frame in floats
 
@@ -78,7 +90,7 @@ GPUs and the engine's transforms are 32-bit. The Earth is 12,742 km across, and 
 - **The sky** is ThreeRT's physical atmosphere, which depends on the viewer's altitude and the sun's angle to the
   local zenith only. With `y` = the local up at `O` and the camera's real altitude given to it (engine change:
   `SkyAtmosphere.altitude`, ROADMAP), the same model serves a street and low orbit.
-- Ray tracing has no depth buffer, so the client has no near/far problem; the web uses a logarithmic depth buffer.
+- Ray tracing has no depth buffer, so the app has no near/far problem; the web uses a logarithmic depth buffer.
 
 ### 3. The trunk: made from open data on first request
 
@@ -103,7 +115,7 @@ endpoint (`/tiles/v1/…`), and a new version starts empty and fills itself as p
   grow region by region (ROADMAP).
 - **Two encodings of every tile** (SPEC § 4): *compact* (quantised heights, class and colour bytes, footprints:
   ~10–30 KB, for the web, which expands it in a worker in milliseconds) and *expanded* (the vertex arrays as the
-  engine takes them, for the client, whose script runs in an interpreter and must not loop over vertices). The
+  engine takes them, for the native app, whose script runs in an interpreter and must not loop over vertices). The
   Worker expands compact tiles itself; both are cached at the edge.
 - Building meshes and terrain meshes are made by the same core function on all three (Worker, web worker, and the
   bake tools), so a tile looks the same everywhere.
@@ -115,10 +127,10 @@ height, heading), how far it reaches (a radius or polygon), what kind it is (**c
 it replaces of the trunk inside it (e.g. the trunk's buildings), and its content:
 
 - **`glb`**: models placed in the place's local frame (east-up-south at the anchor). Runs on the web and in the
-  client. A model made by Meshy is this.
+  app. A model made by Meshy is this.
 - **`scene`**: a ThreeRT scene module (`export default function build(ctx)`), the same API as any ThreeRT game,
-  built in the place's frame. Client only for now: on the web it would be someone else's code on our origin; it
-  comes there in a sandboxed worker later (ROADMAP).
+  built in the place's frame. App only for now (the web shows its baked `fallback` GLB): on the web it would be
+  someone else's code on our origin; it comes there in a sandboxed worker later (ROADMAP).
 - **`tiles`**: a city-sized tile set in the trunk's format (finer levels, z15–z18), produced by the repository's
   own generator and published as release files (GitHub Releases hold the bytes; the index mirrors them).
 
@@ -128,7 +140,7 @@ place's files at that commit from its mirror (`/p/<owner>/<repo>/<sha>/…`: Git
 after). A new commit is a new version of the place after a refresh (a button, a webhook, the crawl).
 
 **Several of the same.** Places say which **topic** they are an alternative for (`city:kyoto`, `city:kyoto@meiji`
-for an era) or are grouped by overlap. For each topic the client shows one: the user's own choice, else the one
+for an era) or are grouped by overlap. For each topic the app and the page show one: the user's own choice, else the one
 ranked first by likes (EarthRT's own) plus the repository's stars. The place panel lists the others, and an era is
 just another topic the user can switch to.
 
@@ -136,15 +148,16 @@ just another topic the user can switch to.
 height over the terrain that eases with the trunk's detail). A place lets the camera go as close as its content
 allows, down to walking in a room.
 
-### 5. Making places: in the client, with the user's own agent
+### 5. Making places: in the app, with the user's own agent
 
-The client's Remix flow already turns anything that plays into a project and starts the user's own Claude Code or
-Codex in it, on their own quota, while the project runs live. EarthRT's place template
-(`threert/earth-place-template`) is such a project: `earthrt.json`, a scene module, models, and tools the agent
-uses: `tools/meshy.ts` (text or image to 3D through the user's Meshy API key, the GLB saved into `models/` and
-placed), `tools/place.ts` (anchor from a map pick, checks), `tools/register.ts` (push to GitHub, register). The
-agent reads AGENTS.md and makes the place; the client shows it inside the globe at its anchor as it changes
-(EarthRT's dev mode: SPEC § 7). Remixing an existing place is the same with that place's repository.
+In the app: pick a spot (or a building) → **Create here**, or open a place → **Remix**. The app makes a project from
+the place template (`threert/earth-place-template`) or clones the place's repository (`~/EarthRT/places/<name>`),
+puts the anchor in its `earthrt.json`, opens it in dev mode (SPEC § 7: the place shows inside the globe at its
+anchor and reloads on every save) and starts the user's own Claude Code or Codex in the agent panel, on their own
+quota, with the project's AGENTS.md. The agent uses the template's tools: `tools/meshy.ts` (text or image to 3D
+through the user's Meshy API key, the GLB sized and placed), `tools/place.ts`, `tools/check.ts`. The app's own
+Meshy panel does the same for a user who just wants a model at a spot. **Publish** pushes to GitHub (a new
+repository under the user's account, the `earthrt-place` topic) and registers it.
 
 ### 6. First-party cities are places too
 
@@ -163,7 +176,7 @@ with GLB landmarks where a generator falls short.
 - Decoding and meshing in a pool of web workers (transferable buffers); an LRU of GPU meshes under a byte budget;
   tiles kept in the Cache Storage API, so a second visit is local. Tile URLs are immutable (the version is in the
   path) and served with year-long cache headers.
-- The client caches every file on disk (`assets.fetch` writes into the package cache), so a city once seen, or a
+- The app caches every file on disk (`assets.fetch` writes into its cache), so a city once seen, or a
   flight prepared ("download for offline": every tile along a route at the detail the route needs), plays without
   the network.
 
@@ -174,20 +187,20 @@ camera rides it; the user looks around freely (yaw and pitch relative to the tra
 the tiles it will need are known ahead: the scheduler fetches them by when they will be needed, at a lower
 priority than what is on screen, and a flight can be prepared for offline in full.
 
-## What this asks of ThreeRT and its client
+## What this asks of ThreeRT
 
 | change | where | why |
 | --- | --- | --- |
 | `SkyAtmosphere.altitude` (the viewer's real altitude, re-baked in place when it changes) | meshy-dev/ThreeRT | a floating frame keeps the camera near y = 0; the sky must see 10 km or 400 km |
-| `assets.fetch` host family | threert/threert-client (core), meshy-dev/ThreeRT (`threert-render play`) | binary tiles into the package cache, then `readAsset` |
+| `assets.fetch` host family, as a library piece an embedding app reuses, and in `threert-render play` | meshy-dev/ThreeRT | binary tiles into a cache directory, then `readAsset`; the EarthRT app's core links it, `play` is the development loop |
 | texture slots freed when nothing names them | meshy-dev/ThreeRT | GLB places come and go; the texture pages must not only grow |
-| streaming budget per frame, measured on a globe | both | thousands of tiles over a flight |
+| streaming budget per frame, measured on a globe | meshy-dev/ThreeRT, `app/` | thousands of tiles over a flight |
 
 ## Repositories
 
 | repository | what | visibility |
 | --- | --- | --- |
-| `threert/EarthRT` | this: core, client package, web engine, service, tools, the spec | public, MIT |
+| `threert/EarthRT` | this: core, the globe's scene script (`app/`), the native app (`native/`), the web engine, the service, tools, the spec | public, MIT |
 | `threert/earth-place-template` | the template for a place (scene, models, Meshy tool, AGENTS.md, checks) | public, template |
 | `threert/earth-<city>` | first-party cities | public |
 | anyone's | places | theirs |

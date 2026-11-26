@@ -45,7 +45,7 @@ follows it. Version numbers are in every format, so an old client meets a new se
   are loaded; until then the parent shows.
 - **Screen-space error**: a tile's geometric error is `size / (n − 1) · 1.5`, `size` its width in metres at its centre's
   latitude; it is refined while `error · viewportHeight / (2 · distance · tan(fov / 2))` exceeds the host's
-  threshold (web 2.5 px, client 2 px; settings may scale it).
+  threshold (web 2.5 px, app 2 px; settings may scale it).
 - **Buildings**: one tile per z14 terrain tile (`meta.buildings.zoom`), shown while that terrain tile or a child of it
   shows. A building is in the tile of its centroid; in v1 a building that crosses a tile edge is cut at the edge into
   pieces that abut (the source's vector tiles are cut that way).
@@ -202,13 +202,13 @@ At the root of a place's repository (or under the path it was registered with).
 ```
 
 - **`glb`**: `position` (m), `rotation` (Euler degrees, XYZ), `scale` (number or [x, y, z]) in the place's frame. A
-  GLB under 64 MiB; textures are its own. Shown on the web (three.js) and in the client. Units as ThreeRT reads a
+  GLB under 64 MiB; textures are its own. Shown on the web (three.js) and in the app. Units as ThreeRT reads a
   GLB: metres, and emission (`emissiveFactor` × `KHR_materials_emissive_strength`) in nits, so a lamp is lit in the
-  client; the web scales emission by its own exposure.
+  app; the web scales emission by its own exposure.
 - **`scene`**: `entry` is a CommonJS bundle (`format: "cjs"`, `@threert/scene` external, which the loader passes
   to its `require`) whose default export is `build(ctx)`; `ctx` is `{ THREE: <@threert/scene>, place, frame,
   readFile(path): ArrayBuffer, time }` (`time`: the local solar time at the anchor, hours), and `build` returns an `Object3D` in the place's frame (or a promise of
-  one). `source` names the TypeScript it was built from. Client only in v1; the web shows the place's `glb`
+  one). `source` names the TypeScript it was built from. App only in v1; the web shows the place's `glb`
   content and its marker. `fallback` (optional) is a GLB of the same thing, drawn by a host that does not run scene
   modules (the web in v1) in the scene's place; a host that runs the scene does not draw it. The place template makes
   it from the scene module itself (`bun run bake`: its meshes, materials and lights as glTF).
@@ -220,21 +220,48 @@ At the root of a place's repository (or under the path it was registered with).
 
 ## 6. Host messages
 
-The client and EarthRT's package talk over ThreeRT's host channel (ThreeRT `docs/RUNTIME.md`, "The host channel").
-EarthRT needs one family beyond what the client has:
+The globe's scene script (`app/`) and the native app (`native/`) talk over ThreeRT's host channel (ThreeRT
+`docs/RUNTIME.md`, "The host channel": JSON objects with a string `t`, queued each way, delivered in batches). The
+app answers ThreeRT's own `net.fetch` (JSON from the registry) and input as RUNTIME.md describes, plus two families.
+The app lists the families it answers in `launch.caps` (`"assets"`, `"earth"`); a script must go on without an
+answer (`threert-render play` answers `assets` only).
+
+**`assets.*`**: binary files into the app's cache, then `readAsset`.
 
 | `t` | direction | fields | |
 | --- | --- | --- | --- |
-| `assets.fetch` | game → app | `id`, `url`, `path`, `sha256?` | download `url` (https, the client's network policy) to `path` under the package's asset root; `path` starts with `cache/` |
-| `assets.fetched` | app → game | `id`, `path`, `status`, `size`, `cached`, `error?` | done: `readAsset(path)` reads it. `status` the HTTP status (0 failed, `error` says why); `cached` when it was there already (same `url`, or same `sha256`) |
-| `assets.cancel` | game → app | `id` | forget a request that has not finished |
+| `assets.fetch` | script → app | `id`, `url`, `path`, `sha256?` | download `url` (https) to `path` under the asset root; `path` starts with `cache/` |
+| `assets.fetched` | app → script | `id`, `path`, `status`, `size`, `cached`, `error?` | done: `readAsset(path)` reads it. `status` the HTTP status (0 failed, `error` says why); `cached` when it was there already (same `url`, or same `sha256`) |
+| `assets.cancel` | script → app | `id` | forget a request that has not finished |
 
-An app that has it lists `"assets"` in `launch.caps`. At most 16 requests are under way; more wait in order. A
-response body may be up to 64 MiB.
+At most 16 requests are under way; more wait in order. A body may be up to 64 MiB. The cache outlives the app
+(`~/Library/Caches/EarthRT/` on macOS): it is the offline store.
+
+**`earth.*`**: the globe and the app's interface. The interface (search, the place panel, flights, settings) is the
+app's own; the script draws the globe and says what it shows.
+
+| `t` | direction | fields | when |
+| --- | --- | --- | --- |
+| `earth.view` | script → app | `lat`, `lon`, `alt`, `heading`, `pitch`, `ground` (terrain height under the camera), `utc` (the scene's time, ms) | when it changed, at most 10 a second |
+| `earth.places` | script → app | `list: [{ id, title, kind, topic, anchor, chosen, loaded }]` | the places in range changed |
+| `earth.selected` | script → app | `id` or null, `versions: [{ id, title, author, likes, stars, era?, chosen }]` | the user picked a place (or none) |
+| `earth.pick` | script → app | `lat`, `lon`, `h`, `place?`, `building?` | a click on the globe (for "Create here") |
+| `earth.flight` | script → app | `state` (`"idle"` \| `"flying"` \| `"done"`), `t`, `duration`, `from`, `to` | a flight started, moved (1 a second) or ended |
+| `earth.status` | script → app | `tiles: { shown, inFlight, queued }`, `bytes`, `frameMs`, `errors?` | once a second, for the status bar and `?debug` |
+| `earth.goto` | app → script | `lat`, `lon`, `alt`, `heading?`, `pitch?`, `seconds?` | fly the camera there (0 s: jump) |
+| `earth.gotoPlace` | app → script | `id` | go to a place's `start` and load it |
+| `earth.select` | app → script | `id` or null | open or close a place's panel |
+| `earth.choose` | app → script | `topic`, `id` | the user's version for a topic (the app keeps choices; it sends them all at launch) |
+| `earth.fly` | app → script | `from`, `to` (`{ lat, lon, alt }` or a place id), `cruise?`, `speed?` | start a flight |
+| `earth.stop` | app → script | | end a flight where the camera is |
+| `earth.time` | app → script | `utc` (ms) or `solarHour`, `rate?` (scene seconds a second) | the sun |
+| `earth.dev` | app → script | `path` (a folder under the asset root, e.g. `dev/<name>/`), `manifest` | show a place under development from local files; sent again after each save (reload) |
+| `earth.settings` | app → script | `sse?` (refinement threshold, px), `buildings?`, `labels?` | the app's settings |
 
 ## 7. Launch parameters and dev mode
 
-The package and the web page read the same parameters (the client's launch `params`, the page's query):
+The app hands the script its launch parameters (`launch.params`); the web page reads the same from its query; an
+`earthrt://open?…` link (the page's "Open in EarthRT") carries them to the app.
 
 | parameter | what |
 | --- | --- |
@@ -242,12 +269,13 @@ The package and the web page read the same parameters (the client's launch `para
 | `place=<owner>/<repo>/<id>` | open a place (fly there, load it) |
 | `fly=<from>;<to>` | start a flight (`lat,lon` or a place id each) |
 | `api=<url>` | another service (a local `wrangler dev`) |
-| `dev=<url>` | a place under development: its `earthrt.json` and files are read from `<url>` instead of the mirror |
+| `dev=<url>` | web only: a place under development served at `<url>` (its `earthrt.json` and files) |
 
-**Dev mode.** A place project (`threert/earth-place-template`) is itself an EarthRT package: its entry is EarthRT's
-with the project's own `earthrt.json` given as the dev place, and its files are the package's assets. So
-`threert dev` in the project shows the globe, flies to the place, and reloads it on every save, in the client and in
-the page, with no special network rule.
+**Dev mode.** In the app, a place project is a folder (made by Create or Remix, or opened with File → Open Place
+Folder, or `earthrt://dev?path=<folder>` from the template's `bun run dev --app`). The app maps it into the asset root
+as `dev/<name>/`, its sidecar builds the scene module on every save, and the app sends `earth.dev` again: the place
+reloads inside the globe at its anchor. On the web, `bun run dev` in the project serves its files (with the CORS and
+private-network headers a page on the service's origin needs) and opens the page with `?dev=<url>`.
 
 ## 8. The registry API
 

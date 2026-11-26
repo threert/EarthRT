@@ -1,9 +1,9 @@
 # EarthRT
 
 **The whole Earth, path-traced.** A globe built from open data, with cities, sites and rooms that anyone makes in a
-GitHub repository and puts on the map. In any browser at its own address; path-traced in the
-[ThreeRT](https://github.com/meshy-dev/ThreeRT) client, every light traced, MetalFX or DLSS Ray Reconstruction
-denoising.
+GitHub repository and puts on the map. In any browser at its own address; path-traced by
+[ThreeRT](https://github.com/meshy-dev/ThreeRT) in the EarthRT app (macOS first), every light traced, MetalFX or DLSS
+Ray Reconstruction denoising.
 
 > Status: the skeleton is being built ([docs/ROADMAP.md](docs/ROADMAP.md)). Nothing here is stable yet.
 
@@ -18,10 +18,10 @@ denoising.
   others are a click away; eras (Kyoto in the Meiji era, in the Shōwa era) are versions too.
 - **Two renderers, one core.** `packages/core` is the logic both share: geodesy, a floating frame for 32-bit GPUs,
   which tiles a view needs, how tiles are read, flights, choosing versions. `web/` draws it with three.js; `app/` is
-  a ThreeRT package that the client path-traces.
-- **Making places** happens in the ThreeRT client: remix a place or start from
-  [the template](https://github.com/threert/earth-place-template), and your own Claude Code or Codex builds it, with
-  Meshy for the models; it shows inside the globe as it changes.
+  the globe's ThreeRT scene script, which the native app (`native/`) path-traces.
+- **Making places** happens in the app: Create at a spot or Remix a place (from
+  [the template](https://github.com/threert/earth-place-template)), and your own Claude Code or Codex builds it in the
+  app's agent panel, with Meshy for the models; it shows inside the globe as it changes.
 
 Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/SPEC.md](docs/SPEC.md) for the contracts.
 
@@ -32,7 +32,8 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/SPEC.
 | `packages/core` | `@earthrt/core`, plain TypeScript, no DOM: runs in browsers, Workers, Bun and the client's QuickJS |
 | `service` | the Cloudflare Worker: trunk tiles, the places registry, the GitHub mirror, the web app's files |
 | `web` | the web engine (three.js) |
-| `app` | the ThreeRT package (the client) |
+| `app` | the globe's ThreeRT scene script (what the native app runs) |
+| `native` | the EarthRT app: Rust core on ThreeRT, SwiftUI for macOS, a Bun sidecar for the coding agent |
 | `tools` | baking, probes, registration, deployment |
 | `engine` | ThreeRT, as a submodule |
 
