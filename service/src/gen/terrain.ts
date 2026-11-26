@@ -19,6 +19,8 @@ export const N = 65;
 /** Land cover at points: ESA WorldCover values (10 … 100), 0 where there is none (the open sea, no data). */
 export interface LandCover {
   sample(lons: Float64Array, lats: Float64Array, degPerPixel: number, only?: Uint8Array): Promise<Uint8Array>;
+  /** share of bare land in the region about each point (0..1), null when unknown */
+  desertShare?(lats: Float64Array, lons: Float64Array): Promise<Float32Array | null>;
   /** source names for the tile's `src` */
   readonly src: string[];
 }
@@ -201,6 +203,14 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
   const normals = gridNormals(key, n, bordered);
   const { lats, lons } = gridLatLon(key, n);
   const rgb = new Uint8Array(3 * n * n);
+  // where bare land is, the region's share of it (desert sand or patchy rock)
+  let share: Float32Array | null = null;
+  if (lc?.desertShare) {
+    const la = new Float64Array(n * n), lo = new Float64Array(n * n);
+    let anyBare = false;
+    for (let v = 0; v < n * n; v++) { la[v] = lats[Math.floor(v / n)]; lo[v] = lons[v % n]; if (cls[v] === CLS.bare) anyBare = true; }
+    if (anyBare) share = await lc.desertShare(la, lo);
+  }
   for (let i = 0; i < n; i++) {
     const { u } = enu(lats[i], 0);
     for (let j = 0; j < n; j++) {
@@ -210,7 +220,7 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       const ux = u[0] * cl - u[1] * sl, uy = u[0] * sl + u[1] * cl, uz = u[2];
       const slope = 1 - (normals[3 * v] * ux + normals[3 * v + 1] * uy + normals[3 * v + 2] * uz);
       const ice = water[v] ? seaIce(lats[i], lons[j]) : 0;
-      albedo(cls[v], lats[i], lons[j], heights[v], slope, water[v] / 255, depth[v], rgb, 3 * v);
+      albedo(cls[v], lats[i], lons[j], heights[v], slope, water[v] / 255, depth[v], rgb, 3 * v, share ? share[v] : -1);
       if (ice > 0) {
         water[v] = Math.round(water[v] * (1 - ice));
         if (ice > 0.5 && cls[v] === CLS.water) cls[v] = CLS.snow;

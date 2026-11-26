@@ -17,10 +17,11 @@ const opt = (f: string, d?: string) => { const i = args.indexOf(f); return i >= 
 const api = opt("--api");
 const up = new MemoUpstream(new BunUpstream());
 const lc = new WorldCover(up);
+const gen = api ? JSON.parse(new TextDecoder().decode((await curl(`${api}/tiles/v1/meta.json`)).body)).gen : "";
 
 async function tile(k: TileKey): Promise<Uint8Array> {
   if (api) {
-    const r = await curl(`${api}/tiles/v1/g1/terrain/${keyOf(k)}.c.ert`);
+    const r = await curl(`${api}/tiles/v1/${gen}/terrain/${keyOf(k)}.c.ert`);
     if (r.status !== 200) throw new Error(`${keyOf(k)}: ${r.status}`);
     return r.body;
   }

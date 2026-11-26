@@ -89,7 +89,7 @@ export function snowLine(lat: number) {
  * The albedo of one vertex. `cls` its class (0 unknown: guessed from the climate), `h` the ground height (m; for water
  * the depth below the surface is `-depth`), `slope` 0 flat … 1 vertical (1 − n·up), `water` 0..1.
  */
-export function albedo(cls: number, lat: number, lon: number, h: number, slope: number, water: number, depth: number, out: Uint8Array, at: number) {
+export function albedo(cls: number, lat: number, lon: number, h: number, slope: number, water: number, depth: number, out: Uint8Array, at: number, desertShare = -1) {
   const a = Math.abs(lat);
   const n1 = fbm(lat, lon, 0.35, 1), n2 = fbm(lat, lon, 0.04, 2);
   let c: RGB;
@@ -108,10 +108,13 @@ export function albedo(cls: number, lat: number, lon: number, h: number, slope: 
     case CLS.shrub: c = mix(SHRUB, SHRUB_DRY, arid); break;
     case CLS.grass: c = mix(GRASS, GRASS_DRY, clamp01(arid * 1.2 + (a > 55 ? 0.2 : 0))); break;
     case CLS.crop: c = mix(CROP, CROP_DRY, clamp01(arid + (n2 - 0.5) * 0.6)); break;
-    case CLS.built: c = BUILT; break;
+    case CLS.built: c = mix(BUILT, [138, 128, 116], n2 * 0.7); break;
     case CLS.bare: {
       // deserts sand-coloured, red in places (Sahara's east, Australia), rock elsewhere and at high latitudes
-      const desert = (1 - smooth(42, 52, a)) * (1 - smooth(2500, 4000, h));
+      // sand where the region around is mostly bare (a desert), rock and gravel where bare land is patchy (volcanoes,
+      // river beds, quarries); without the regional share, by latitude
+      const regional = (desertShare >= 0 ? smooth(0.3, 0.6, desertShare) : 1) * (1 - smooth(46, 54, a));
+      const desert = regional * (1 - smooth(2500, 4000, h));
       c = mix(mix(ROCK, ROCK_DARK, n2 * 0.6), mix(SAND, SAND_RED, 0.45 * smooth(0.35, 0.85, fbm(lat, lon, 5, 5))), desert);
       break;
     }
@@ -121,6 +124,7 @@ export function albedo(cls: number, lat: number, lon: number, h: number, slope: 
     case CLS.moss: c = mix(MOSS, TUNDRA, n1); break;
     default: c = mix(GRASS, SHRUB, 0.5);
   }
+  if (cls === CLS.built) { const v = 0.9 + 0.2 * n2; c = [c[0] * v, c[1] * v, c[2] * v]; }
   if (cls !== CLS.snow && cls !== CLS.water && cls !== CLS.built) {
     // variation inside a class: ±12 % brightness, a little hue
     const v = 0.88 + 0.24 * n2, w = (n1 - 0.5) * 0.12;

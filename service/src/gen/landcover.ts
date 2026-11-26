@@ -48,9 +48,32 @@ function cogOf(up: Upstream, cell: string) {
   return p;
 }
 
+/** The share of bare land among the land cells within ±`r` cells (1/4°) of a point, from the coarse raster. */
+export async function desertShare(up: Upstream, lats: Float64Array, lons: Float64Array, r = 3): Promise<Float32Array | null> {
+  const g = await rasterObject(up, COARSE.key);
+  if (!g) return null;
+  const out = new Float32Array(lats.length);
+  for (let k = 0; k < lats.length; k++) {
+    const x = Math.floor((lons[k] + 180) * COARSE.perDeg), y = Math.floor((90 - lats[k]) * COARSE.perDeg);
+    let land = 0, bare = 0;
+    for (let dy = -r; dy <= r; dy++) {
+      const yy = y + dy;
+      if (yy < 0 || yy >= COARSE.h) continue;
+      for (let dx = -r; dx <= r; dx++) {
+        const v = g[yy * COARSE.w + (((x + dx) % COARSE.w) + COARSE.w) % COARSE.w];
+        if (v && v !== 80) { land++; if (v === 60) bare++; }
+      }
+    }
+    out[k] = land ? bare / land : 0;
+  }
+  return out;
+}
+
 export class WorldCover implements LandCover {
   readonly src = ["worldcover"];
   constructor(private up: Upstream, private cells?: Set<string>) {}
+
+  desertShare(lats: Float64Array, lons: Float64Array) { return desertShare(this.up, lats, lons); }
 
   async sample(lons: Float64Array, lats: Float64Array, degPerPixel: number, only?: Uint8Array): Promise<Uint8Array> {
     const out = new Uint8Array(lons.length);
