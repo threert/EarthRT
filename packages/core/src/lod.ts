@@ -41,6 +41,9 @@ export interface SelectOptions {
   maxZoom: number;
   /** Known heights of tiles (loaded ones) and whether a tile is ready. */
   info: (key: string) => TileInfo | undefined;
+  /** A zoom a tile must be refined to whatever its error (a city's ground: its tiles are draped on that zoom's
+   *  triangles, SPEC § 5 `tiles`). */
+  minZoom?: (k: { z: number; x: number; y: number }) => number;
 }
 
 /** Conservative radius for horizon culling: the polar radius less the Dead Sea's depth. */
@@ -89,7 +92,7 @@ export function selectTiles(view: View, opt: SelectOptions): Selection {
       sel.want.push({ key: k, priority: sse });
       return;
     }
-    const refine = !isCap(k) && sse > opt.threshold && k.z < opt.maxZoom;
+    const refine = !isCap(k) && k.z < opt.maxZoom && (sse > opt.threshold || (opt.minZoom?.(k as { z: number; x: number; y: number }) ?? 0) > k.z);
     if (!refine) {
       sel.show.push(k);
       sel.sse.set(key, sse);

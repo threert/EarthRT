@@ -80,7 +80,11 @@ export class Scheduler<T> {
       f.n++;
       f.until = this.now() + Math.min(60_000, 500 * 2 ** f.n);
       this.failures.set(id, f);
-    } else this.failures.delete(id);
+    } else {
+      this.failures.delete(id);
+      // done: not asked for again before the next want() says it is still wanted
+      this.wanted.delete(id);
+    }
     this.readyQueue.push({ id, ...r });
     this.pump();
   }
