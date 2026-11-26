@@ -242,6 +242,8 @@ describe("flight, sun, places", () => {
     expect(validatePlace({ ...ok, content: [{ type: "glb", uri: "../x.glb" }] }).length).toBe(1);
     expect(validatePlace({ ...ok, content: [{ type: "glb", uri: "https://x/a.glb" }] }).length).toBe(1);
     expect(validatePlace({ ...ok, topic: "city:Kyoto" }).length).toBe(1);
+    expect(validatePlace({ ...ok, content: [{ type: "scene", entry: "dist/scene.js", fallback: "assets/models/scene.glb" }] })).toEqual([]);
+    expect(validatePlace({ ...ok, content: [{ type: "scene", entry: "dist/scene.js", fallback: "assets/scene.gltf" }] }).length).toBe(1);
   });
   test("versions: choice, else the best ranked", () => {
     const rec = (id: string, likes: number, stars: number, topic = "city:kyoto"): PlaceRecord => ({ id, repo: id, sha: "x", manifest: {} as never, files: "", author: "a", likes, stars, topic, updated: "2026-11-26" });

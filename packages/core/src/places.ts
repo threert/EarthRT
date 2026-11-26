@@ -4,7 +4,13 @@ import { Frame, haversine } from "./geo.ts";
 export type PlaceKind = "city" | "site" | "interior";
 
 export interface GlbContent { type: "glb"; uri: string; position?: [number, number, number]; rotation?: [number, number, number]; scale?: number | [number, number, number] }
-export interface SceneContent { type: "scene"; entry: string; source?: string }
+export interface SceneContent {
+  type: "scene";
+  entry: string;
+  source?: string;
+  /** A GLB of the same thing that a host which does not run scene modules (the web in v1) draws instead. */
+  fallback?: string;
+}
 export interface TilesContent { type: "tiles"; uri: string }
 export type PlaceContent = GlbContent | SceneContent | TilesContent;
 
@@ -87,6 +93,7 @@ export function validatePlace(m: unknown): string[] {
       const s = c as SceneContent;
       if (!isRel(s.entry) || !/\.(c?js)$/i.test(s.entry)) e.push(`content[${i}].entry: a relative path to the built .js`);
       if (s.source !== undefined && !isRel(s.source)) e.push(`content[${i}].source: a relative path`);
+      if (s.fallback !== undefined && (!isRel(s.fallback) || !/\.glb$/i.test(s.fallback))) e.push(`content[${i}].fallback: a relative path to a .glb`);
     } else if (t === "tiles") {
       if (!isRel((c as TilesContent).uri)) e.push(`content[${i}].uri: a relative path to tileset.json`);
     } else e.push(`content[${i}].type: "glb", "scene" or "tiles"`);
