@@ -47,7 +47,10 @@ Light lightAt(vec3 world) {
 
 vec3 diffuse(vec3 albedo, vec3 N, Light l, float ao) {
   float ndl = max(dot(N, uSun), 0.0);
-  vec3 E = l.sun * ndl + l.sky * (0.6 + 0.4 * dot(N, l.up)) * ao;
+  float nu = dot(N, l.up);
+  // the sky from above, and light the ground throws back (albedo ~0.2, warm) onto what faces sideways or down
+  vec3 ground = vec3(0.22, 0.2, 0.17) * (l.sun * max(l.muS, 0.0) + l.sky);
+  vec3 E = l.sun * ndl + (l.sky * (0.5 + 0.5 * nu) + ground * (0.5 - 0.5 * nu)) * ao;
   // a little light on the night side (the moon, the sky's glow) so the land is not a hole
   return albedo / PI * E + albedo * vec3(0.8, 0.9, 1.2) * 4e-5;
 }
@@ -92,6 +95,8 @@ ${ATMOSPHERE_COMMON}
 ${ATMOSPHERE_LOOKUP}
 ${SHADING}
 uniform vec3 cameraPosition;
+uniform vec4 uHoles[8];      // places: centre in the frame, radius (m)
+uniform int uHoleCount;
 in vec3 vWorld;
 in vec3 vNormal;
 in vec3 vColor;
@@ -165,7 +170,13 @@ void main() {
   vec3 c = land(N, fw, l, Nl);
   if (vWater > 0.01) c = mix(c, sea(l.up, fw, l), smoothstep(0.2, 0.8, vWater));
   outColor = vec4(c, 1.0);
-  gl_FragDepth = log2(vFragDepth) * logDepthBufFC * 0.5;
+  // inside a place the place's own ground wins over the trunk's (coplanar floors would fight): pushed back 1% + 15 cm
+  float w = vFragDepth - 1.0;
+  for (int i = 0; i < 8; i++) {
+    if (i >= uHoleCount) break;
+    if (distance(vWorld, uHoles[i].xyz) < uHoles[i].w) { w = w * 1.01 + 0.15; break; }
+  }
+  gl_FragDepth = log2(1.0 + w) * logDepthBufFC * 0.5;
 }
 `;
 
@@ -236,7 +247,7 @@ void main() {
 export function terrainMaterial(atmo: Atmosphere, noise: THREE.IUniform<THREE.Texture>, time: THREE.IUniform<number>) {
   return new THREE.RawShaderMaterial({
     glslVersion: THREE.GLSL3, vertexShader: TERRAIN_VERT, fragmentShader: TERRAIN_FRAG,
-    uniforms: { ...atmo.uniforms, uNoise: noise, uTime: time, logDepthBufFC: { value: 1 } },
+    uniforms: { ...atmo.uniforms, uNoise: noise, uTime: time, logDepthBufFC: { value: 1 }, uHoles: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) }, uHoleCount: { value: 0 } },
   });
 }
 

@@ -223,6 +223,7 @@ export class App {
     this.places.update(s);
     this.globe.setSun(sunDirection(this.time));
     this.globe.buildingsMat.uniforms.uHoleCount.value = this.places.holes(this.globe.buildingsMat.uniforms.uHoles.value);
+    this.globe.terrainMat.uniforms.uHoleCount.value = this.places.holes(this.globe.terrainMat.uniforms.uHoles.value, "terrain");
     this.globe.render(f.terrain, f.buildings, (now - this.started) / 1000);
     if (f.hole) this.holes++;
     if (f.coarse > 0) this.coarseFrames++;

@@ -120,11 +120,20 @@ export class Places {
   }
 
   /** "Go there": the place's start view, else a view of its anchor from its size. */
-  goTo(p: PlaceRecord) {
+  goTo(p: PlaceRecord, again = true) {
     const m = p.manifest;
     const l = this.loaded.get(p.id);
-    const ground = l?.ground ?? this.app.tiles.groundAt(m.anchor.lat, m.anchor.lon);
+    const ground = l && l.groundZoom >= 0 ? l.ground : this.app.tiles.groundAt(m.anchor.lat, m.anchor.lon);
     const g = Number.isFinite(ground) ? ground : 0;
+    const zoom = this.app.tiles.zoomAt(m.anchor.lat, m.anchor.lon);
+    // on arrival: if the ground there was only known coarsely when this was aimed (the floor kept the camera above
+    // its guess), aim again with what has arrived since
+    const done = () => {
+      if (!again) return;
+      const z2 = this.app.tiles.zoomAt(m.anchor.lat, m.anchor.lon);
+      const h2 = this.app.tiles.groundAt(m.anchor.lat, m.anchor.lon);
+      if (z2 > zoom || (Number.isFinite(h2) && Math.abs(h2 - g) > 0.5)) this.goTo(p, false);
+    };
     if (m.start) {
       const f = placeFrame(m, g);
       const pos = f.pointToEcef(m.start.position), tgt = f.pointToEcef(m.start.target);
@@ -135,11 +144,11 @@ export class Places {
         Math.cos((gp.lat * Math.PI) / 180) * Math.sin((gt.lat * Math.PI) / 180) - Math.sin((gp.lat * Math.PI) / 180) * Math.cos((gt.lat * Math.PI) / 180) * Math.cos(((gt.lon - gp.lon) * Math.PI) / 180),
       ) * 180) / Math.PI;
       const tilt = (Math.acos(Math.max(-1, Math.min(1, (gp.h - gt.h) / Math.max(range, 1e-3)))) * 180) / Math.PI;
-      this.app.goTo(this.app.viewOf(gt.lat, gt.lon, gt.h, range, heading, Math.min(88, tilt)));
+      this.app.goTo(this.app.viewOf(gt.lat, gt.lon, gt.h, range, heading, Math.min(88, tilt)), done);
       return;
     }
     const r = placeRadius(m);
-    this.app.goTo(this.app.viewOf(m.anchor.lat, m.anchor.lon, g, Math.max(150, r * 2.5), m.anchor.heading ?? 0, 55));
+    this.app.goTo(this.app.viewOf(m.anchor.lat, m.anchor.lon, g, Math.max(150, r * 2.5), m.anchor.heading ?? 0, 55), done);
   }
 
   /** A place under development (SPEC § 7, `dev=`): its manifest and files from a URL, reloaded when the dev server
@@ -295,23 +304,25 @@ export class Places {
   }
 
   /** Where the trunk's buildings must not show (places that replace them), as (centre in the frame, radius). */
-  holes(out: THREE.Vector4[]): number {
+  holes(out: THREE.Vector4[], layer: "buildings" | "terrain" = "buildings"): number {
     let n = 0;
     for (const l of this.loaded.values()) {
       const m = l.record.manifest;
-      if (!m.replaces?.includes("buildings") || l.state !== "ready" || n >= out.length) continue;
+      if ((layer === "buildings" && !m.replaces?.includes("buildings")) || l.state !== "ready" || n >= out.length) continue;
       const c = this.app.globe.origin.frame.point(geodeticToEcef(m.anchor.lat, m.anchor.lon, l.ground));
       out[n++].set(c[0], c[1], c[2], placeRadius(m));
     }
     return n;
   }
 
-  /** A place's minDistance near a loaded place (ARCHITECTURE § 4: a place earns close views; around it too, so the
+  /** A place's minDistance near a known place (ARCHITECTURE § 4: a place earns close views; around it too, so the
    *  camera can come down to it: within 3× its radius, at least 150 m), else undefined. */
   minDistanceAt(lat: number, lon: number): number | undefined {
     let best: number | undefined;
-    for (const l of this.loaded.values()) {
-      const m = l.record.manifest;
+    // every place the page knows (the chosen versions), loaded or not: the camera must be able to come down to a
+    // place before it loads (it loads within its visibleFrom)
+    for (const p of this.chosen.values()) {
+      const m = p.manifest;
       if (haversine(lat, lon, m.anchor.lat, m.anchor.lon) > Math.max(150, placeRadius(m) * 3)) continue;
       const d = m.minDistance ?? 1;
       best = best === undefined ? d : Math.min(best, d);
