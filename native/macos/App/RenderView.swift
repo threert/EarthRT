@@ -196,6 +196,8 @@ final class RenderNSView: NSView {
     }
     func snapshot(to path: String) { if let handle { ert_snapshot(handle, path) } }
     func reload(_ bundle: String) { if let handle { ert_reload(handle, bundle) } }
+    /// Stops drawing (the map is shown) or starts again.
+    func pause(_ paused: Bool) { if let handle { ert_pause(handle, paused) } }
     /// The Graphics settings: quality, reconstruction, fps, bounces (native/core `ert_rendering`).
     func rendering(_ settings: [String: Any]) {
         guard let handle, let data = try? JSONSerialization.data(withJSONObject: settings), let text = String(data: data, encoding: .utf8) else { return }

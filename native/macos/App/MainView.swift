@@ -159,17 +159,27 @@ struct GlobeView: View {
     @EnvironmentObject var model: Model
     var body: some View {
         ZStack {
+            // The map (the web's map engine), and over it the traced view of a place entered.
+            MapView(controller: model.map).ignoresSafeArea()
             RenderView(view: model.view).ignoresSafeArea()
+                .opacity(model.traced ? 1 : 0)
+                .allowsHitTesting(model.traced)
             if let fatal = model.fatal {
-                ContentUnavailableView { Label("The globe could not start", systemImage: "exclamationmark.triangle") } description: { Text(fatal).textSelection(.enabled) }
+                ContentUnavailableView { Label("The map could not start", systemImage: "exclamationmark.triangle") } description: { Text(fatal).textSelection(.enabled) }
                     .background(.background)
             } else if !model.ready {
-                VStack(spacing: 10) { ProgressView(); Text("Starting the path tracer…").foregroundStyle(.secondary) }
+                VStack(spacing: 10) { ProgressView(); Text("Loading the map…").foregroundStyle(.secondary) }
             }
             VStack(spacing: 10) {
-                if model.flight.state == "flying" { FlightCard().padding(.top, 10) }
+                if model.traced {
+                    TracedBar().padding(.top, 10)
+                } else if model.flight.state == "flying" {
+                    FlightCard().padding(.top, 10)
+                }
                 Spacer()
-                if let pick = model.pick, model.ready { PickCard(pick: pick) }
+                if let entering = model.entering { EnteringCard(id: entering) }
+                else if !model.traced, let near = model.near, model.ready { NearCard(id: near.id) }
+                else if !model.traced, let pick = model.pick, model.ready { PickCard(pick: pick) }
                 StatusBar()
             }
             .padding(.horizontal, 12).padding(.bottom, 10)
@@ -198,15 +208,18 @@ struct StatusBar: View {
                 .help("Local solar time")
             Spacer()
             let t = model.tiles
-            if t.inFlight + t.queued > 0 {
-                HStack(spacing: 5) { ProgressView().controlSize(.mini); Text("Loading \(t.inFlight + t.queued) tiles") }
+            if model.traced {
+                Label("Path-traced", systemImage: "sparkles").help("ThreeRT on \(model.adapter)\(model.hwrt ? ", hardware ray tracing" : "")")
+                if let fps = model.stats["fps"] as? NSNumber { Text("\(Int(fps.doubleValue.rounded())) fps").monospacedDigit() }
+                if !model.renderStatus.isEmpty { Text(model.renderStatus).help("Denoiser · render scale (Settings → Graphics)") }
             } else {
-                Label("\(t.shown) tiles", systemImage: "square.grid.3x3").help("Tiles shown · \(t.resident) in memory")
+                if t.inFlight + t.queued > 0 {
+                    HStack(spacing: 5) { ProgressView().controlSize(.mini); Text("Loading \(t.inFlight + t.queued) tiles") }
+                } else {
+                    Label("\(t.shown) tiles", systemImage: "square.grid.3x3").help("Tiles shown")
+                }
+                if model.mapFrameMs > 0 { Text(String(format: "%.0f fps", min(120, 1000 / max(model.mapFrameMs, 1)))).monospacedDigit().help("The map's frame rate") }
             }
-            if let fps = model.stats["fps"] as? NSNumber {
-                Text("\(Int(fps.doubleValue.rounded())) fps").monospacedDigit().help("\(model.adapter)\(model.hwrt ? ", hardware ray tracing" : "")")
-            }
-            if !model.renderStatus.isEmpty { Text(model.renderStatus).help("Reconstruction · render scale (View → Graphics)") }
         }
         .font(.caption)
         .foregroundStyle(.secondary)
@@ -231,10 +244,6 @@ struct FlightCard: View {
                 ProgressView(value: f.progress)
             }
             .frame(width: 320)
-            Menu {
-                ForEach([10.0, 30, 60, 120, 300, 1000], id: \.self) { k in Button("\(Int(k))× real time") { model.flightSpeed(k) } }
-            } label: { Text("\(Int(f.speedup.rounded()))×").monospacedDigit() }
-            .menuStyle(.borderlessButton).fixedSize().help("How fast the flight goes (or scroll over the globe)")
             Button { model.downloadFlight() } label: { Image(systemName: "arrow.down.circle") }.buttonStyle(.borderless).help("Download this flight for offline use")
             Button("Stop") { model.stopFlight() }.keyboardShortcut(".", modifiers: .command)
         }
@@ -242,6 +251,70 @@ struct FlightCard: View {
         .card()
     }
     private func clock(_ s: Double) -> String { String(format: "%d:%02d", Int(s) / 60, Int(s) % 60) }
+}
+
+/// Over the traced view: where you are, and the way back to the map.
+struct TracedBar: View {
+    @EnvironmentObject var model: Model
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles").foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(model.record?.title ?? model.project?.title ?? "Path-traced").font(.headline)
+                Text("Every light traced by ThreeRT · drag to look, W A S D to walk, Esc to leave").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 20)
+            Button { model.exitTraced(camera: nil) } label: { Label("Back to Map", systemImage: "map") }
+                .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: 620)
+        .card()
+    }
+}
+
+/// While a place loads for the traced view.
+struct EnteringCard: View {
+    @EnvironmentObject var model: Model
+    let id: String
+    var body: some View {
+        HStack(spacing: 12) {
+            ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Entering \(title)…").font(.headline)
+                Text(model.tracedLoading.total > 0 ? "\(model.tracedLoading.done) of \(model.tracedLoading.total) files" : "Starting the path tracer").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 16)
+            Button("Cancel") { model.exitTraced(camera: nil) }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: 460)
+        .card()
+    }
+    private var title: String { model.nearby.first(where: { $0.id == id })?.title ?? model.record?.title ?? (id.hasPrefix("dev/") ? model.project?.title ?? "the place" : "the place") }
+}
+
+/// The camera came close to a place that has a traced view: offer it.
+struct NearCard: View {
+    @EnvironmentObject var model: Model
+    let id: String
+    var body: some View {
+        let place = model.nearby.first(where: { $0.id == id })
+        HStack(spacing: 12) {
+            Image(systemName: Theme.kindIcon(place?.kind ?? "site")).font(.title3).foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place?.title ?? "A place").font(.headline)
+                Text("See it path-traced, every light traced").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 16)
+            Button { model.select(id) } label: { Label("Details", systemImage: "info.circle") }
+            Button { model.enter(id) } label: { Label("Enter", systemImage: "sparkles") }.buttonStyle(.borderedProminent)
+            Button { model.near = nil } label: { Image(systemName: "xmark") }.buttonStyle(.borderless).help("Not now")
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(maxWidth: 560)
+        .card()
+    }
 }
 
 struct PickCard: View {

@@ -19,3 +19,4 @@ void ert_snapshot(ErtView *view, const char *path);
 void ert_reload(ErtView *view, const char *bundle);
 void ert_rendering(ErtView *view, const char *json);
 void ert_destroy(ErtView *view);
+void ert_pause(ErtView *view, bool paused);

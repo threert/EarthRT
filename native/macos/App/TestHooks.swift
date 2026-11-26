@@ -88,6 +88,12 @@ enum TestHooks {
                 if let mode = m["appearance"] as? String { NSApp.appearance = mode == "light" ? NSAppearance(named: .aqua) : mode == "dark" ? NSAppearance(named: .darkAqua) : nil }
                 model.answer(m, ["frame": [w.frame.origin.x, w.frame.origin.y, w.frame.width, w.frame.height], "content": [w.contentLayoutRect.width, w.contentLayoutRect.height], "number": w.windowNumber])
             } else { model.answer(m, ["error": "no window"]) }
+        case "app.enter":
+            if let id = m["place"] as? String { model.enter(id) }
+            model.answer(m)
+        case "app.exit":
+            model.exitTraced(camera: nil)
+            model.answer(m)
         case "app.state":
             model.answer(m, state(model))
         default:
@@ -111,6 +117,8 @@ enum TestHooks {
             "rendering": model.renderStatus, "fps": model.stats["fps"] ?? 0,
             "inspector": model.showInspector ? model.inspector.rawValue : NSNull(),
             "github": model.github?.login ?? NSNull(),
+            "traced": model.traced, "entering": model.entering ?? NSNull(), "tracedFatal": model.tracedFatal ?? NSNull(),
+            "near": model.near?.id ?? NSNull(), "mapFrameMs": model.mapFrameMs,
         ]
     }
 

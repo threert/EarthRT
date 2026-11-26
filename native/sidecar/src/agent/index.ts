@@ -140,9 +140,9 @@ export class AgentBridge {
 /** The block in front of every prompt: where the agent is and how the place is doing. The guide is AGENTS.md. */
 function preamble(host: AgentHost): string {
   const lines = [
-    `This folder (${host.project}, your working directory) is an EarthRT place, open in the EarthRT app in dev mode beside you: every saved file is built (\`bun tools/build.ts\`) and the place reloads inside the path-traced globe within a second or two.`,
+    `This folder (${host.project}, your working directory) is an EarthRT place, open in the EarthRT app in dev mode beside you: every saved file is built (\`bun tools/build.ts\`) and the place reloads within a second or two, on the map (its GLB or fallback) and in the path-traced view (its scene, every light traced).`,
     host.context(),
-    "On your first turn read AGENTS.md in this folder. After a change run `earthrt check` (builds the scene, validates earthrt.json, and reports what the app's globe said when it loaded the place) and fix what it reports; `earthrt shot <file.png>` saves what the globe shows (the app flies to the place first; `--camera '{\"position\":[x,y,z],\"target\":[x,y,z]}'` in the place's frame looks from elsewhere): look at it before you say you are done. `earthrt` needs no permission; `bun run check` (the full check) and `bun run meshy` do.",
+    "On your first turn read AGENTS.md in this folder. After a change run `earthrt check` (builds the scene, validates earthrt.json, and reports what the app said when it loaded the place) and fix what it reports; `earthrt shot <file.png>` saves the place path-traced, as the app's traced view shows it (`--camera '{\"position\":[x,y,z],\"target\":[x,y,z]}'` in the place's frame looks from elsewhere, `--map` shows it on the map instead): look at it before you say you are done. `earthrt` needs no permission; `bun run check` (the full check) and `bun run meshy` do.",
   ].filter(Boolean);
   return `<app>\n${lines.join("\n")}\n</app>\n\n`;
 }

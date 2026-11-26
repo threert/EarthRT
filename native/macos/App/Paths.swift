@@ -1,9 +1,10 @@
 // Where the app's parts are. A development build runs from the repository (Info.plist `EarthRTRoot`, set by
-// project.yml, or EARTHRT_ROOT): the sidecar's sources, the globe's bundle (app/dist/earth.js), the engine's presets.
-// A packaged app carries them in Contents/Resources/earthrt (native/tools/release.ts).
+// project.yml, or EARTHRT_ROOT): the sidecar's sources, the map engine's build (web/dist), the traced view's script
+// (traced/dist), the engine's presets. A packaged app carries them in Contents/Resources/earthrt (tools/release.ts).
 //
-// The globe's asset root (what the script's readAsset reads) is ~/Library/Application Support/EarthRT/root, with
-//   cache -> ~/Library/Caches/EarthRT      the disk cache assets.fetch writes into (SPEC § 6): the offline store
+// The traced view's asset root (what its readAsset reads) is ~/Library/Application Support/EarthRT/root, with
+//   cache -> ~/Library/Caches/EarthRT      the disk cache: assets.fetch writes into it, the map's ert:// scheme
+//                                          reads and fills it (SPEC § 6): the offline store
 //   dev/<name>-<n> -> <a place's folder>   places in dev mode (one link a build: a reload never reads a stale file)
 import Foundation
 
@@ -17,9 +18,19 @@ enum Paths {
         return (Bundle.main.resourcePath ?? ".") + "/earthrt"
     }()
     static var sidecar: String { root + "/native/sidecar/src/main.ts" }
+    /// The traced view's script (traced/, built by its own build).
     static var bundle: String {
         if let env = ProcessInfo.processInfo.environment["EARTHRT_BUNDLE"], !env.isEmpty { return env }
-        return root + "/app/dist/earth.js"
+        // (A developer's override: `defaults write dev.threert.earthrt EarthRTTraced <file>`.)
+        if let d = UserDefaults.standard.string(forKey: "EarthRTTraced"), !d.isEmpty { return d }
+        return root + "/traced/dist/traced.js"
+    }
+    /// The map engine's build (web/dist), loaded by the WKWebView as ert://app/.
+    static var web: String {
+        if let env = ProcessInfo.processInfo.environment["EARTHRT_WEB"], !env.isEmpty { return env }
+        // (A developer's override: `defaults write dev.threert.earthrt EarthRTWeb <dist folder>`.)
+        if let d = UserDefaults.standard.string(forKey: "EarthRTWeb"), !d.isEmpty { return d }
+        return root + "/web/dist"
     }
     static var presets: String { root + "/engine/presets" }
     /// The sidecar's build folder (its server file, the agents' adapters, the `earthrt` launcher). A packaged app's

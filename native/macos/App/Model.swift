@@ -1,15 +1,18 @@
-// The app's state and the switchboard between its parts: the globe (native/core, through RenderNSView), the sidecar
-// (place projects, the agent, the `earthrt` command line) and the SwiftUI interface.
+// The app's state and the switchboard between its parts: the map (the web's map engine in a WKWebView, MapView.swift),
+// the traced view (native/core through RenderNSView), the sidecar (place projects, the agent, the `earthrt` command
+// line) and the SwiftUI interface (ARCHITECTURE § 1a, SPEC § 6).
 //
-//   globe    earth.view / places / selected / pick / flight / status / prefetched ──▶ model ──▶ the interface
-//   UI       goto, select, choose, fly, time, prefetch, dev ──▶ model ──▶ globe (earth.*, SPEC § 6)
-//   sidecar  place.opened / place.built ──▶ model: dev/<name>-<n> link, earth.dev ──▶ globe ──▶ runtime.place
+//   map      earth.view / places / selected / pick / near / flight / status / prefetched ──▶ model ──▶ the interface
+//   UI       goto, select, choose, fly, time, dev, pause ──▶ model ──▶ map (earth.*, SPEC § 6.1)
+//   Enter    traced.open {place | dev, camera, utc} ──▶ traced view ──▶ traced.ready: cross-fade in, earth.pause
+//   exit     traced.exit {camera} ──▶ earth.goto (0 s), cross-fade out, traced.close
+//   sidecar  place.opened / place.built ──▶ model: ert://dev/<name>/ for the map, dev/<name>-<n>/ for the traced view
 import AppKit
 import Foundation
 import SwiftUI
 
 struct View3: Equatable {
-    var lat = 35.0, lon = 135.7, alt = 12_000_000.0, heading = 0.0, pitch = -90.0, ground = 0.0, utc = Date().timeIntervalSince1970 * 1000
+    var lat = 35.0, lon = 135.7, alt = 12_000_000.0, heading = 0.0, pitch = -90.0, fov = 45.0, ground = 0.0, utc = Date().timeIntervalSince1970 * 1000
 }
 
 struct NearbyPlace: Identifiable, Hashable {
@@ -161,10 +164,13 @@ enum InspectorTab: String, CaseIterable, Identifiable {
 final class Model: ObservableObject {
     static let shared = Model()
 
+    /// The traced view (shown over the map when a place is entered).
     let view = RenderNSView()
+    /// The map.
+    let map = MapController()
     private let sidecar = Sidecar()
 
-    // The globe
+    // The map
     @Published var ready = false
     @Published var fatal: String?
     @Published var adapter = ""
@@ -181,6 +187,20 @@ final class Model: ObservableObject {
     @Published var pick: Pick?
     @Published var flight = Flight()
     @Published var downloads: [Download] = []
+    @Published var mapGPU = 0.0
+    @Published var mapFrameMs = 0.0
+    /// A place the camera came close to (`earth.near`): the app offers Enter.
+    @Published var near: (id: String, distance: Double)?
+
+    // The traced view
+    /// Shown (faded in) over the map.
+    @Published var traced = false
+    /// Entering: `traced.open` sent, `traced.ready` not yet.
+    @Published var entering: String?
+    @Published var tracedLoading = (done: 0, total: 0)
+    @Published var tracedFatal: String?
+    private var tracedStarted = false
+    private var tracedPlace: String?
 
     // The interface
     @Published var showInspector = false
@@ -239,12 +259,15 @@ final class Model: ObservableObject {
     private var lineSerial = 0
 
     private var started = false
-    private var pendingLinks: [URL] = []
     private var snapshots: [String: Int] = [:]
     private var windowShots: [String: (id: Int, path: String)] = [:]
     private var logBatch: [[String: Any]] = []
     private var devSerial = 0
-    private var loadWatch: (seq: Int, id: String, since: Date, errors: [String])?
+    /// A build of the open place waiting to be seen: on the map (`earth.places` lists it loaded) or, when the traced
+    /// view shows it, there (`traced.ready`); then the sidecar hears `runtime.place` (what `earthrt check` waits for).
+    private var loadWatch: (seq: Int, id: String, since: Date, errors: [String], traced: Bool)?
+    /// The map's address for the open place: ert://dev/<name>@<n>/ (a new one each build: nothing cached is read).
+    private var mapDevBase: String?
     private var searchTask: Task<Void, Never>?
 
     var launchParams: [String: String] = [:]
@@ -253,17 +276,32 @@ final class Model: ObservableObject {
         guard !started else { return }
         started = true
         view.onPosts = { [weak self] posts in self?.posts(posts) }
+        map.onMessage = { [weak self] m in self?.mapMessage(m) }
+        map.onConsole = { [weak self] level, text in self?.mapConsole(level, text) }
         sidecar.onMessage = { [weak self] message in self?.receive(message) }
         sidecar.onStatus = { [weak self] status in self?.sidecarStatus = status }
         sidecar.start()
-        var options: [String: Any] = ["params": launchParams, "rendering": renderingSettings(), "fps": fps]
+        if FileManager.default.fileExists(atPath: Paths.web + "/index.html") {
+            map.load(params: launchParams)
+        } else {
+            fatal = "The map engine's build is missing (\(Paths.web)): run `bun native/tools/macos.ts`, which builds it."
+        }
+    }
+
+    /// Starts the traced view's core (the first Enter): on the asset root, paused until a place is ready.
+    private func startTraced() -> Bool {
+        if tracedStarted { return true }
+        guard FileManager.default.fileExists(atPath: Paths.bundle) else {
+            tracedFatal = "The traced view's script is missing (\(Paths.bundle)): run `bun native/tools/macos.ts`, which builds it."
+            notice = tracedFatal
+            return false
+        }
+        var options: [String: Any] = ["params": [String: String](), "rendering": renderingSettings(), "fps": fps]
         if let proxy = Sidecar.systemProxy() { options["proxy"] = proxy }
         view.options = options
-        if FileManager.default.fileExists(atPath: Paths.bundle) {
-            view.start(bundle: Paths.bundle)
-        } else {
-            fatal = "The globe's script is missing (\(Paths.bundle)): run `bun app/build.ts`, or `bun native/tools/macos.ts`, which does."
-        }
+        view.start(bundle: Paths.bundle)
+        tracedStarted = true
+        return true
     }
 
     func stop() {
@@ -271,9 +309,56 @@ final class Model: ObservableObject {
         sidecar.stop()
     }
 
-    // ----- to the globe -----
+    // ----- to the map, to the traced view -----
 
-    func send(_ message: [String: Any]) { view.send([message]) }
+    func send(_ message: [String: Any]) { map.send(message) }
+
+    func tracedSend(_ message: [String: Any]) { view.send([message]) }
+
+    /// The map's camera as the traced view takes it (SPEC § 6.2 `traced.open`).
+    private var cameraJSON: [String: Any] {
+        ["lat": camera.lat, "lon": camera.lon, "alt": camera.alt, "heading": camera.heading, "pitch": camera.pitch, "fov": camera.fov]
+    }
+
+    // ----- Enter: a place path-traced, over the map, from the map's camera -----
+
+    /// Enters a place (a registry id, or "dev/<id>" for the open project).
+    func enter(_ id: String) {
+        guard startTraced() else { return }
+        entering = id
+        tracedLoading = (0, 0)
+        if id.hasPrefix("dev/"), let p = project, let path = tracedDevPath {
+            tracedSend(["t": "traced.open", "dev": ["path": path, "manifest": p.manifest], "camera": cameraJSON, "utc": camera.utc])
+            tracedPlace = id
+            return
+        }
+        Task {
+            guard let raw = try? await Registry.raw(id) else { notice = "Could not load \(id) from the registry"; entering = nil; return }
+            tracedSend(["t": "traced.open", "place": raw, "camera": cameraJSON, "utc": camera.utc])
+            tracedPlace = id
+        }
+    }
+
+    /// Back to the map, where the traced view's camera is (or the map's, if it never showed).
+    func exitTraced(camera c: [String: Any]? = nil) {
+        if let c, let lat = c["lat"] as? Double, let lon = c["lon"] as? Double, let alt = c["alt"] as? Double {
+            var m: [String: Any] = ["t": "earth.goto", "lat": lat, "lon": lon, "alt": alt, "seconds": 0]
+            for k in ["heading", "pitch", "fov"] { if let v = c[k] { m[k] = v } }
+            send(m)
+        }
+        send(["t": "earth.pause", "paused": false])
+        withAnimation(.easeInOut(duration: 0.45)) { traced = false }
+        entering = nil
+        tracedPlace = nil
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self, !self.traced else { return }
+            self.tracedSend(["t": "traced.close"])
+            self.view.pause(true)
+        }
+    }
+
+    /// The traced view's link to the open project (dev mode).
+    private var tracedDevPath: String?
 
     func goto(lat: Double, lon: Double, alt: Double, heading: Double? = nil, pitch: Double? = nil, seconds: Double = 3) {
         var m: [String: Any] = ["t": "earth.goto", "lat": lat, "lon": lon, "alt": alt, "seconds": seconds]
@@ -316,20 +401,6 @@ final class Model: ObservableObject {
 
     func stopFlight() { send(["t": "earth.stop"]) }
 
-    /// The flight's speed: the globe's own keys (`,` halves it, `.` doubles it), until a message for it exists.
-    func flightSpeed(_ target: Double) {
-        var k = max(flight.speedup, 1)
-        var presses: [String] = []
-        while k * 2 <= target * 1.42 { k *= 2; presses.append("Period") }
-        while k / 2 >= target / 1.42 { k /= 2; presses.append("Comma") }
-        for (i, key) in presses.prefix(12).enumerated() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) { [weak self] in
-                self?.view.key(key, down: true)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) { self?.view.key(key, down: false) }
-            }
-        }
-    }
-
     func setTime(hour: Double?) {
         if let hour {
             solarHour = hour
@@ -339,6 +410,7 @@ final class Model: ObservableObject {
             send(["t": "earth.time", "utc": Date().timeIntervalSince1970 * 1000, "rate": 1])
             timeRate = 1
         }
+        if traced { tracedSend(["t": "traced.time", "utc": hour.map(utc(solarHour:)) ?? Date().timeIntervalSince1970 * 1000, "rate": timeRate]) }
     }
 
     func setTimeRate(_ rate: Double) {
@@ -351,7 +423,15 @@ final class Model: ObservableObject {
         setTime(hour: hour)
     }
 
-    /// Local solar time at the camera, hours (from the globe's clock in earth.view).
+    /// The UTC moment (ms) when it is `solarHour` at the camera's longitude, on the map clock's day.
+    func utc(solarHour: Double) -> Double {
+        let day = (camera.utc / 86_400_000).rounded(.down) * 86_400_000
+        var u = day + (solarHour - camera.lon / 15) * 3_600_000
+        if u < day - 43_200_000 { u += 86_400_000 }
+        return u
+    }
+
+    /// Local solar time at the camera, hours (from the map's clock in earth.view).
     var localSolarHour: Double {
         let h = camera.utc / 3_600_000 + camera.lon / 15
         return (h.truncatingRemainder(dividingBy: 24) + 24).truncatingRemainder(dividingBy: 24)
@@ -402,10 +482,17 @@ final class Model: ObservableObject {
             openFolder(path)
             return
         }
-        // Before the globe runs, a link's parameters are the launch's.
-        if !ready {
+        // Before the map is loaded, a link's parameters are its launch parameters (SPEC § 7).
+        if !started {
             for (k, v) in q where ["at", "place", "fly", "time", "utc", "api"].contains(k) { launchParams[k] = v }
-            if started { pendingLinks.append(url) } else { return }
+            if action == "enter", let place = q["place"] { pendingEnter = place }
+            return
+        }
+        if traced { exitTraced() }
+        if action == "enter", let place = q["place"] {
+            gotoPlace(place)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.enter(place) }
+            NSApp.activate(ignoringOtherApps: true)
             return
         }
         if let at = q["at"] {
@@ -420,6 +507,8 @@ final class Model: ObservableObject {
         if let time = q["time"], let h = Double(time) { setTime(hour: h) }
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    private var pendingEnter: String?
 
     /// One end of a flight from a link: "lat,lon" as a point, anything else (a city, a place id) as it is.
     private func point(_ s: String) -> Any {
@@ -628,10 +717,23 @@ final class Model: ObservableObject {
         case "app.shot":
             guard let id = m["id"] as? Int, let path = m["path"] as? String else { return }
             let frame = NSTemporaryDirectory() + "earthrt-window-\(id).png"
-            windowShots[frame] = (id, path)
-            DispatchQueue.main.asyncAfter(deadline: .now() + (m["wait"] as? Double ?? 0.5)) { [weak self] in self?.view.snapshot(to: frame) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (m["wait"] as? Double ?? 0.5)) { [weak self] in
+                guard let self else { return }
+                if self.traced {
+                    self.windowShots[frame] = (id, path)
+                    self.view.snapshot(to: frame)
+                } else {
+                    self.map.snapshot(to: frame) { _, _ in
+                        let size = WindowShot.compose(over: self.map.web, frame: frame, hide: [self.view, self.map.web], to: path)
+                        self.sidecarSend("answer", ["id": id, "path": path, "width": size.width, "height": size.height])
+                    }
+                }
+            }
         case "app.send":
-            view.send(m["messages"] as? [[String: Any]] ?? [])
+            // (`earthrt send`: earth.* for the map, traced.* for the traced view.)
+            for msg in m["messages"] as? [[String: Any]] ?? [] {
+                if (msg["t"] as? String ?? "").hasPrefix("earth.") { send(msg) } else { tracedSend(msg) }
+            }
         default:
             if let type = m["t"] as? String, type.hasPrefix("app.") { TestHooks.handle(m, model: self) }
             else if m["t"] as? String == "error" { addLine(level: "error", source: "sidecar", text: m["message"] as? String ?? "") }
@@ -690,18 +792,27 @@ final class Model: ObservableObject {
             sidecarSend("runtime.place", ["seq": seq, "loaded": false, "errors": problems.map(\.message)])
             return
         }
-        // A link of its own for each build: the globe reads the place's files afresh.
+        // Addresses of their own for each build: neither view reads a file it kept from the build before.
         devSerial += 1
+        let manifest = m["manifest"] as? [String: Any] ?? p.manifest
+        map.scheme.devFolders["\(p.name)@\(devSerial)"] = p.folder
+        let base = "ert://dev/\(p.name)@\(devSerial)/"
+        mapDevBase = base
         let path = Paths.linkDev(name: p.name, folder: p.folder, serial: devSerial)
+        tracedDevPath = path
         devPath = path
         placeLoaded = false
-        send(["t": "earth.dev", "path": path, "manifest": m["manifest"] as? [String: Any] ?? p.manifest])
-        loadWatch = (seq, "dev/\(p.id)", Date(), [])
-        addLine(level: "info", source: "place", text: "built \(p.name) (#\(seq), \(buildMs) ms): reloading it in the globe")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
+        send(["t": "earth.dev", "base": base, "manifest": manifest])
+        let inTraced = (traced || entering != nil) && tracedPlace == "dev/\(p.id)"
+        if inTraced {
+            tracedSend(["t": "traced.open", "dev": ["path": path, "manifest": manifest], "camera": cameraJSON, "utc": camera.utc])
+        }
+        loadWatch = (seq, "dev/\(p.id)", Date(), [], inTraced)
+        addLine(level: "info", source: "place", text: "built \(p.name) (#\(seq), \(buildMs) ms): reloading it \(inTraced ? "in the traced view" : "on the map")")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 25) { [weak self] in
             guard let self, let w = self.loadWatch, w.seq == seq else { return }
             self.loadWatch = nil
-            self.sidecarSend("runtime.place", ["seq": seq, "loaded": false, "errors": w.errors + ["the globe did not show the place within 20 s"]])
+            self.sidecarSend("runtime.place", ["seq": seq, "loaded": false, "errors": w.errors + ["the \(w.traced ? "traced view" : "map") did not show the place within 25 s"]])
         }
     }
 
@@ -735,29 +846,26 @@ final class Model: ObservableObject {
         }
     }
 
-    // ----- from the globe -----
+    // ----- from the traced view (the core) -----
 
     private func posts(_ list: [[String: Any]]) {
         for p in list {
             switch p["t"] as? String ?? "" {
             case "rt.ready":
-                ready = true
                 adapter = p["adapter"] as? String ?? ""
                 hwrt = p["hwrt"] as? Bool ?? false
-                // The user's versions, then what the links asked for before the globe ran.
-                for (topic, id) in choices { send(["t": "earth.choose", "topic": topic, "id": id]) }
-                send(["t": "earth.settings", "buildings": buildings, "sse": detail])
-                for url in pendingLinks { open(url: url) }
-                pendingLinks = []
+                view.pause(entering == nil)
             case "rt.fatal":
-                fatal = p["message"] as? String ?? "The renderer could not start"
-                addLine(level: "error", source: "engine", text: fatal!)
+                tracedFatal = p["message"] as? String ?? "The path tracer could not start"
+                notice = tracedFatal
+                entering = nil
+                addLine(level: "error", source: "traced", text: tracedFatal!)
             case "rt.error":
                 let place = p["where"] as? String ?? "?"
                 let message = p["message"] as? String ?? ""
-                addLine(level: "error", source: place, text: message)
+                addLine(level: "error", source: "traced " + place, text: message)
                 sidecarSend("runtime.error", ["where": place, "message": message])
-                if loadWatch != nil { loadWatch!.errors.append("[\(place)] \(message)") }
+                if loadWatch != nil { loadWatch!.errors.append("[traced \(place)] \(message)") }
             case "rt.stats":
                 stats = p
                 if let r = p["rendering"] as? [String: Any] { renderStatus = Model.describe(rendering: r) }
@@ -766,73 +874,125 @@ final class Model: ObservableObject {
             case "log":
                 let level = p["level"] as? String ?? "log"
                 let text = p["text"] as? String ?? ""
-                addLine(level: level, source: "globe", text: text)
-                logBatch.append(["level": level, "text": text])
-                if loadWatch != nil, level == "error" || text.contains("dev place") || (text.contains("place") && text.contains("error")) { loadWatch!.errors.append(text) }
-            case "earth.view":
+                addLine(level: level, source: "traced", text: text)
+                logBatch.append(["level": level, "text": "traced: " + text])
+                if loadWatch != nil, level == "error" || text.contains("dev place") { loadWatch!.errors.append(text) }
+            case "traced.loading":
+                tracedLoading = (p["done"] as? Int ?? 0, p["total"] as? Int ?? 0)
+            case "traced.ready":
+                guard entering != nil || traced else { break }
+                view.pause(false)
+                withAnimation(.easeInOut(duration: 0.45)) { traced = true }
+                entering = nil
+                // The map stops drawing under it.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in if self?.traced == true { self?.send(["t": "earth.pause", "paused": true]) } }
+                if let w = loadWatch, w.traced { loadWatch = nil; sidecarSend("runtime.place", ["seq": w.seq, "loaded": true, "errors": w.errors, "view": "traced"]) }
+            case "traced.view":
+                // (While the map is paused, the camera the status bar shows is the traced view's.)
                 var v = camera
                 for (k, value) in p { if let n = (value as? NSNumber)?.doubleValue {
-                    switch k { case "lat": v.lat = n; case "lon": v.lon = n; case "alt": v.alt = n; case "heading": v.heading = n; case "pitch": v.pitch = n; case "ground": v.ground = n; case "utc": v.utc = n; default: break }
+                    switch k { case "lat": v.lat = n; case "lon": v.lon = n; case "alt": v.alt = n; case "heading": v.heading = n; case "pitch": v.pitch = n; case "fov": v.fov = n; default: break }
                 } }
-                if v != camera { camera = v }
-            case "earth.places":
-                nearby = (p["list"] as? [[String: Any]] ?? []).compactMap { j in
-                    guard let id = j["id"] as? String else { return nil }
-                    let a = j["anchor"] as? [String: Any]
-                    return NearbyPlace(id: id, title: j["title"] as? String ?? id, kind: j["kind"] as? String ?? "site", topic: j["topic"] as? String ?? "",
-                                       lat: (a?["lat"] as? NSNumber)?.doubleValue ?? 0, lon: (a?["lon"] as? NSNumber)?.doubleValue ?? 0,
-                                       chosen: j["chosen"] as? Bool ?? false, loaded: j["loaded"] as? Bool ?? false)
-                }
-                if let w = loadWatch, let dev = nearby.first(where: { $0.id == w.id }), dev.loaded {
-                    loadWatch = nil
-                    placeLoaded = true
-                    sidecarSend("runtime.place", ["seq": w.seq, "loaded": true, "errors": w.errors])
-                }
-            case "earth.selected":
-                let id = p["id"] as? String
-                selectedID = id
-                versions = (p["versions"] as? [[String: Any]] ?? []).compactMap { j in
-                    guard let vid = j["id"] as? String else { return nil }
-                    let era = (j["era"] as? [String: Any])?["label"] as? String
-                    return Version(id: vid, title: j["title"] as? String ?? vid, author: j["author"] as? String ?? "", likes: j["likes"] as? Int ?? 0,
-                                   stars: j["stars"] as? Int ?? 0, era: era, chosen: j["chosen"] as? Bool ?? false)
-                }
-                if let id { Task { await loadRecord(id) }; sidebarSelection = id } else { record = nil }
-            case "earth.pick":
-                let lat = (p["lat"] as? NSNumber)?.doubleValue ?? 0, lon = (p["lon"] as? NSNumber)?.doubleValue ?? 0
-                pick = Pick(lat: lat, lon: lon, h: (p["h"] as? NSNumber)?.doubleValue ?? 0, place: p["place"] as? String, building: p["building"] as? String)
-                if let place = p["place"] as? String { select(place) }
-            case "earth.flight":
-                var f = Flight()
-                f.state = p["state"] as? String ?? "idle"
-                f.seconds = (p["seconds"] as? NSNumber)?.doubleValue ?? 0
-                f.duration = (p["duration"] as? NSNumber)?.doubleValue ?? 0
-                f.from = (p["from"] as? [String: Any])?["title"] as? String ?? ""
-                f.to = (p["to"] as? [String: Any])?["title"] as? String ?? ""
-                f.paused = p["paused"] as? Bool ?? false
-                f.speedup = (p["speedup"] as? NSNumber)?.doubleValue ?? 1
-                flight = f
-            case "earth.status":
-                let t = p["tiles"] as? [String: Any] ?? [:]
-                tiles = (t["shown"] as? Int ?? 0, t["inFlight"] as? Int ?? 0, t["queued"] as? Int ?? 0, t["resident"] as? Int ?? 0)
-                tileBytes = (p["bytes"] as? NSNumber)?.int64Value ?? 0
-                gen = p["gen"] as? String ?? gen
-            case "earth.prefetched":
-                guard let id = p["id"] as? String else { break }
-                var d = downloads.first(where: { $0.id == id }) ?? Download(id: id, title: id)
-                d.done = p["done"] as? Int ?? d.done
-                d.total = p["total"] as? Int ?? d.total
-                d.bytes = (p["bytes"] as? NSNumber)?.int64Value ?? d.bytes
-                d.failed = p["failed"] as? Int ?? d.failed
-                d.state = p["state"] as? String ?? d.state
-                if let i = downloads.firstIndex(where: { $0.id == id }) { downloads[i] = d } else { downloads.insert(d, at: 0) }
-                if d.state == "done" { notice = "\(d.title) is downloaded: \(d.total) tiles, \(ByteCountFormatter.string(fromByteCount: d.bytes, countStyle: .file))" }
+                if traced, v != camera { camera = v }
+            case "traced.exit":
+                exitTraced(camera: p["camera"] as? [String: Any])
+            case "traced.status":
+                if let r = p["reconstruction"] as? String { renderStatus = r + (renderStatus.contains("·") ? " ·" + (renderStatus.components(separatedBy: "·").last ?? "") : "") }
             default: break
             }
         }
+        flushLogs()
+    }
+
+    private func flushLogs() {
         if !logBatch.isEmpty {
             sidecarSend("runtime.logs", ["lines": logBatch])
             logBatch = []
+        }
+    }
+
+    private func mapConsole(_ level: String, _ text: String) {
+        addLine(level: level, source: "map", text: text)
+        logBatch.append(["level": level, "text": "map: " + text])
+        if loadWatch != nil, level == "error", text.contains("dev") || text.contains("place") { loadWatch!.errors.append(text) }
+        flushLogs()
+    }
+
+    // ----- from the map -----
+
+    private func mapMessage(_ p: [String: Any]) {
+        switch p["t"] as? String ?? "" {
+        case "earth.ready":
+            ready = true
+            // The user's versions and settings; then what a link asked to enter.
+            for (topic, id) in choices { send(["t": "earth.choose", "topic": topic, "id": id]) }
+            send(["t": "earth.settings", "buildings": buildings, "sse": detail, "quality": "app"])
+            if let place = pendingEnter { pendingEnter = nil; DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in self?.enter(place) } }
+            if let p = project, let base = mapDevBase { send(["t": "earth.dev", "base": base, "manifest": p.manifest]) }
+        case "earth.view":
+            var v = camera
+            for (k, value) in p { if let n = (value as? NSNumber)?.doubleValue {
+                switch k { case "lat": v.lat = n; case "lon": v.lon = n; case "alt": v.alt = n; case "heading": v.heading = n; case "pitch": v.pitch = n; case "fov": v.fov = n; case "ground": v.ground = n; case "utc": v.utc = n; default: break }
+            } }
+            if !traced, v != camera { camera = v }
+        case "earth.places":
+            nearby = (p["list"] as? [[String: Any]] ?? []).compactMap { j in
+                guard let id = j["id"] as? String else { return nil }
+                let a = j["anchor"] as? [String: Any]
+                return NearbyPlace(id: id, title: j["title"] as? String ?? id, kind: j["kind"] as? String ?? "site", topic: j["topic"] as? String ?? "",
+                                   lat: (a?["lat"] as? NSNumber)?.doubleValue ?? 0, lon: (a?["lon"] as? NSNumber)?.doubleValue ?? 0,
+                                   chosen: j["chosen"] as? Bool ?? false, loaded: j["loaded"] as? Bool ?? false)
+            }
+            if let w = loadWatch, !w.traced, let dev = nearby.first(where: { $0.id == w.id }), dev.loaded {
+                loadWatch = nil
+                placeLoaded = true
+                sidecarSend("runtime.place", ["seq": w.seq, "loaded": true, "errors": w.errors, "view": "map"])
+            }
+        case "earth.selected":
+            let id = p["id"] as? String
+            selectedID = id
+            versions = (p["versions"] as? [[String: Any]] ?? []).compactMap { j in
+                guard let vid = j["id"] as? String else { return nil }
+                let era = (j["era"] as? [String: Any])?["label"] as? String ?? j["era"] as? String
+                return Version(id: vid, title: j["title"] as? String ?? vid, author: j["author"] as? String ?? "", likes: j["likes"] as? Int ?? 0,
+                               stars: j["stars"] as? Int ?? 0, era: era, chosen: j["chosen"] as? Bool ?? false)
+            }
+            if let id { Task { await loadRecord(id) }; sidebarSelection = id } else { record = nil }
+        case "earth.pick":
+            let lat = (p["lat"] as? NSNumber)?.doubleValue ?? 0, lon = (p["lon"] as? NSNumber)?.doubleValue ?? 0
+            pick = Pick(lat: lat, lon: lon, h: (p["h"] as? NSNumber)?.doubleValue ?? 0, place: p["place"] as? String, building: p["building"] as? String)
+            if let place = p["place"] as? String { select(place) }
+        case "earth.near":
+            if let id = p["id"] as? String { near = (id, (p["distance"] as? NSNumber)?.doubleValue ?? 0) } else { near = nil }
+        case "earth.flight":
+            var f = Flight()
+            f.state = p["state"] as? String ?? "idle"
+            f.seconds = ((p["seconds"] ?? p["t_"] ?? p["time"]) as? NSNumber)?.doubleValue ?? (p["elapsed"] as? NSNumber)?.doubleValue ?? 0
+            f.duration = (p["duration"] as? NSNumber)?.doubleValue ?? 0
+            let title = { (x: Any?) -> String in (x as? [String: Any])?["title"] as? String ?? (x as? String) ?? "" }
+            f.from = title(p["from"])
+            f.to = title(p["to"])
+            f.paused = p["paused"] as? Bool ?? false
+            f.speedup = (p["speedup"] as? NSNumber)?.doubleValue ?? 1
+            flight = f
+        case "earth.status":
+            let t = p["tiles"] as? [String: Any] ?? [:]
+            tiles = (t["shown"] as? Int ?? 0, t["inFlight"] as? Int ?? 0, t["queued"] as? Int ?? 0, t["resident"] as? Int ?? 0)
+            tileBytes = (p["bytes"] as? NSNumber)?.int64Value ?? 0
+            mapGPU = (p["gpuMB"] as? NSNumber)?.doubleValue ?? mapGPU
+            mapFrameMs = (p["frameMs"] as? NSNumber)?.doubleValue ?? mapFrameMs
+            gen = p["gen"] as? String ?? gen
+        case "earth.prefetched":
+            guard let id = p["id"] as? String else { break }
+            var d = downloads.first(where: { $0.id == id }) ?? Download(id: id, title: id)
+            d.done = p["done"] as? Int ?? d.done
+            d.total = p["total"] as? Int ?? d.total
+            d.bytes = (p["bytes"] as? NSNumber)?.int64Value ?? d.bytes
+            d.failed = p["failed"] as? Int ?? d.failed
+            d.state = p["state"] as? String ?? d.state
+            if let i = downloads.firstIndex(where: { $0.id == id }) { downloads[i] = d } else { downloads.insert(d, at: 0) }
+            if d.state == "done" { notice = "\(d.title) is downloaded: \(d.total) tiles, \(ByteCountFormatter.string(fromByteCount: d.bytes, countStyle: .file))" }
+        default: break
         }
     }
 
@@ -853,31 +1013,58 @@ final class Model: ObservableObject {
 
     // ----- snapshots: `earthrt shot` (the globe at the place) and app.shot (the whole window) -----
 
+    /// `earthrt shot`: the open place (`place`), path-traced (default) or on the map (`view: "map"`), from its start or
+    /// a camera in its frame; or what is shown now.
     private func snapshotRequest(_ m: [String: Any]) {
         guard let id = m["id"] as? Int, let path = m["path"] as? String else { return }
         let wait = m["wait"] as? Double ?? 2
-        var delay = wait
-        if m["place"] as? Bool == true, let p = project {
-            send(["t": "earth.gotoPlace", "id": "dev/\(p.id)"])
-            delay += 3
-            if let cam = m["camera"] as? [String: Any] {
-                // After the flight there: the camera in the place's frame, as a pose (the ground from earth.view).
-                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                    guard let self else { return }
-                    if let pose = PlaceFrame.pose(camera: cam, manifest: p.manifest, ground: self.camera.ground) {
-                        self.goto(lat: pose.lat, lon: pose.lon, alt: pose.alt, heading: pose.heading, pitch: pose.pitch, seconds: 0)
-                    }
-                }
-                delay += 1
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        let onMap = (m["view"] as? String) == "map"
+        let shoot = { [weak self] in
             guard let self else { return }
-            self.whenSettled(timeout: 20) {
+            if self.traced && !onMap {
                 self.snapshots[path] = id
                 self.view.snapshot(to: path)
+            } else {
+                self.map.snapshot(to: path) { w, h in self.sidecarSend("answer", ["id": id, "path": path, "width": w, "height": h]) }
             }
         }
+        guard m["place"] as? Bool == true, let p = project else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + wait) { shoot() }
+            return
+        }
+        if traced && onMap { exitTraced() }
+        send(["t": "earth.gotoPlace", "id": "dev/\(p.id)"])
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
+            guard let self else { return }
+            // The camera in the place's frame, as a pose (the ground under the anchor from the map's earth.view).
+            if let cam = m["camera"] as? [String: Any], let pose = PlaceFrame.pose(camera: cam, manifest: p.manifest, ground: self.camera.ground) {
+                self.camera.lat = pose.lat; self.camera.lon = pose.lon; self.camera.alt = pose.alt; self.camera.heading = pose.heading; self.camera.pitch = pose.pitch
+                self.goto(lat: pose.lat, lon: pose.lon, alt: pose.alt, heading: pose.heading, pitch: pose.pitch, seconds: 0)
+            }
+            if onMap {
+                self.whenSettled(timeout: 20) { DispatchQueue.main.asyncAfter(deadline: .now() + wait) { shoot() } }
+                return
+            }
+            if self.traced { self.exitTraced() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                self.enter("dev/\(p.id)")
+                self.whenTraced(timeout: 40) { ok in
+                    if !ok { self.sidecarSend("answer", ["id": id, "error": "the traced view did not show the place within 40 s"]); return }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { shoot() }
+                }
+            }
+        }
+    }
+
+    /// Runs `then(true)` once the traced view shows (or `then(false)` after `timeout` s).
+    func whenTraced(timeout: Double, _ then: @escaping (Bool) -> Void) {
+        let until = Date().addingTimeInterval(timeout)
+        func check() {
+            if traced { then(true); return }
+            if Date() > until || tracedFatal != nil { then(false); return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { check() }
+        }
+        check()
     }
 
     /// Runs `then` once the globe has no tiles coming (or after `timeout` s).
@@ -892,7 +1079,7 @@ final class Model: ObservableObject {
 
     private func snapshotTaken(_ p: [String: Any]) {
         if let frame = p["path"] as? String, let shot = windowShots.removeValue(forKey: frame) {
-            let size = WindowShot.compose(view: view, frame: frame, to: shot.path)
+            let size = WindowShot.compose(over: view, frame: frame, hide: [view, map.web], to: shot.path)
             sidecarSend("answer", ["id": shot.id, "path": shot.path, "width": size.width, "height": size.height])
         } else if let path = p["path"] as? String, let id = snapshots.removeValue(forKey: path) {
             sidecarSend("answer", ["id": id, "path": path, "width": p["width"] as? Int ?? 0, "height": p["height"] as? Int ?? 0])
@@ -904,8 +1091,9 @@ final class Model: ObservableObject {
     func snapshotToDesktop() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        view.snapshot(to: NSHomeDirectory() + "/Desktop/EarthRT \(formatter.string(from: Date())).png")
-        notice = "Saved a picture of the globe to the Desktop"
+        let path = NSHomeDirectory() + "/Desktop/EarthRT \(formatter.string(from: Date())).png"
+        if traced { view.snapshot(to: path) } else { map.snapshot(to: path) { _, _ in } }
+        notice = "Saved a picture to the Desktop"
     }
 
     func copyLink() {

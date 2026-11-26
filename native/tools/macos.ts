@@ -24,17 +24,22 @@ const step = (s: string) => console.log(`\x1b[1m${s}\x1b[0m`);
 
 if (!existsSync(join(native, "sidecar/node_modules"))) await $`bun install --frozen-lockfile`.cwd(join(native, "sidecar"));
 if (!args.includes("--no-bundle")) {
-  // The globe's script: app/build.ts bundles it with the engine's tools (esbuild from the engine's packages).
-  if (!existsSync(join(root, "engine/node_modules/esbuild"))) {
-    step("engine: bun install (the bundler for the globe's script)");
-    await $`bun install`.cwd(join(root, "engine")).quiet();
-  }
-  step("app: bun app/build.ts (the globe's script)");
-  await $`bun app/build.ts`.cwd(root);
-  if (!existsSync(join(root, "app/dist/earth.js"))) {
-    console.error("app/build.ts made no app/dist/earth.js");
-    process.exit(1);
-  }
+  // The map: the web's map engine (web/), built into web/dist (the app loads it as ert://app/).
+  if (!existsSync(join(root, "node_modules"))) await $`bun install`.cwd(root).quiet();
+  if (existsSync(join(root, "web/tools/build.ts"))) {
+    if (!existsSync(join(root, "web/node_modules"))) await $`bun install`.cwd(join(root, "web")).quiet();
+    step("web: the map engine (web/tools/build.ts)");
+    await $`bun web/tools/build.ts`.cwd(root);
+  } else console.log("(no web/ yet: the app says the map engine's build is missing)");
+  // The traced view: traced/'s script, bundled with the engine's tools (esbuild from the engine's packages).
+  if (existsSync(join(root, "traced/build.ts"))) {
+    if (!existsSync(join(root, "engine/node_modules/esbuild"))) {
+      step("engine: bun install (the bundler for the traced view's script)");
+      await $`bun install`.cwd(join(root, "engine")).quiet();
+    }
+    step("traced: the traced view's script (traced/build.ts)");
+    await $`bun traced/build.ts`.cwd(root);
+  } else console.log("(no traced/ yet: the app's Enter says the traced view's script is missing)");
 }
 if (!args.includes("--no-core")) {
   step("core: cargo build --release (the first build takes a few minutes)");

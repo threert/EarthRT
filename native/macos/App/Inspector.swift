@@ -64,7 +64,8 @@ struct PlacePanel: View {
 
     private func actions(_ id: String) -> some View {
         HStack(spacing: 8) {
-            Button { model.gotoPlace(id) } label: { Label("Go There", systemImage: "location.fill") }.buttonStyle(.borderedProminent)
+            Button { model.enter(id) } label: { Label("Enter", systemImage: "sparkles") }.buttonStyle(.borderedProminent).help("See it path-traced")
+            Button { model.gotoPlace(id) } label: { Label("Go There", systemImage: "location") }
             if !id.hasPrefix("dev/") {
                 Button { model.toggleLike(id) } label: {
                     Label(model.liked.contains(id) ? "Liked" : "Like", systemImage: model.liked.contains(id) ? "heart.fill" : "heart")
@@ -164,7 +165,8 @@ struct CreatePanel: View {
                         Text(p.folder.replacingOccurrences(of: NSHomeDirectory(), with: "~")).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                     }
                     HStack(spacing: 8) {
-                        Button { model.gotoPlace("dev/\(p.id)") } label: { Label("Go There", systemImage: "location.fill") }.buttonStyle(.borderedProminent)
+                        Button { model.enter("dev/\(p.id)") } label: { Label("Enter", systemImage: "sparkles") }.buttonStyle(.borderedProminent).help("See it path-traced")
+                        Button { model.gotoPlace("dev/\(p.id)") } label: { Label("Go There", systemImage: "location") }
                         Button { model.inspector = .agent } label: { Label("Ask the Agent", systemImage: "sparkles") }
                         Menu {
                             Button("Show in Finder") { model.revealProject() }
@@ -201,7 +203,7 @@ struct CreatePanel: View {
             HStack(spacing: 8) {
                 Image(systemName: !model.buildOK ? "xmark.octagon.fill" : model.placeLoaded ? "checkmark.circle.fill" : "clock")
                     .foregroundStyle(!model.buildOK ? .red : model.placeLoaded ? .green : .secondary)
-                Text(!model.buildOK ? "The place does not build" : model.placeLoaded ? "Shown in the globe, reloads on every save" : "Loading into the globe…")
+                Text(!model.buildOK ? "The place does not build" : model.placeLoaded ? "On the map and in the traced view, reloaded on every save" : "Loading…")
             }
             ForEach(model.problems.prefix(6)) { p in
                 Text("\(p.file)\(p.line > 0 ? ":\(p.line)" : "") \(p.message)").font(.caption.monospaced()).foregroundStyle(.red).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)

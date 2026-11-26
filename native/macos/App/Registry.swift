@@ -79,6 +79,11 @@ enum Registry {
         PlaceRecord(try await json(request("/places/\(id)")))
     }
 
+    /// A place's record as the registry gives it (`traced.open`'s `place`: id, manifest, files, …).
+    static func raw(_ id: String) async throws -> [String: Any] {
+        try await json(request("/places/\(id)"))
+    }
+
     static func like(_ id: String, _ on: Bool, token: String) async throws {
         _ = try await json(request("/places/\(id)/like", method: on ? "PUT" : "DELETE", token: token))
     }

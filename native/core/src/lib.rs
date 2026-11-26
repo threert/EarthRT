@@ -1,5 +1,6 @@
-//! The EarthRT app's globe view: ThreeRT's live path tracer running the globe's scene script (`app/`, bundled by
-//! `bun app/build.ts`), drawn on a CAMetalLayer the app owns. The SwiftUI app calls in through the C ABI at the end
+//! The EarthRT app's traced view: ThreeRT's live path tracer running the traced view's scene script (`traced/`: one
+//! place and its surroundings, ARCHITECTURE § 1), drawn on a CAMetalLayer the app shows over the map when a place is
+//! entered. The map itself is the web's map engine in a WKWebView (native/macos); this core draws only places. The SwiftUI app calls in through the C ABI at the end
 //! of this file (`native/macos/App/Core.h`). Derived from threert/native-app-template's `core/` (MIT, Meshy LLC).
 //!
 //! Everything runs on one thread of its own: the GPU device, the script runtime and the present. Calls from the app
@@ -10,9 +11,11 @@
 //!   disk cache;
 //! - `net.*`: `net.fetch` for the registry's JSON (src/net.rs);
 //! - `audio.*`: the engine's mixer;
-//! - everything else (the `earth.*` family, `log`s, the script's own) goes to the app.
+//! - everything else (the `traced.*` family, `log`s, the script's own) goes to the app.
 //!
-//! Messages the core sends the script: `launch {params: {width, height, …the app's}, caps: ["assets", "earth"]}`
+//! While the map is shown the app pauses the view (`ert_pause`): no frames, no GPU work; the script's clock stops.
+//!
+//! Messages the core sends the script: `launch {params: {width, height, …the app's}, caps: ["assets", "traced"]}`
 //! once after setup (and after a reload), `view {width, height}` when the size changes, and `input` every frame.
 //!
 //! Messages the core itself posts (besides the script's):
@@ -45,8 +48,8 @@ use threert_render::{audio::Audio, gpu};
 /// The room id the script gets (`setup(roomId)`): empty, the launch message carries the parameters.
 const ROOM: &str = "";
 
-/// The families of the host channel the app answers (SPEC § 6), for `launch.caps`.
-pub const CAPS: &[&str] = &["assets", "earth"];
+/// The families of the host channel the app answers (SPEC § 6.2), for `launch.caps`.
+pub const CAPS: &[&str] = &["assets", "traced"];
 
 enum Cmd {
     Resize(u32, u32, f32),
@@ -58,6 +61,7 @@ enum Cmd {
     Snapshot(PathBuf),
     Reload(PathBuf),
     Rendering(Value),
+    Pause(bool),
     Quit,
 }
 
@@ -93,7 +97,7 @@ pub enum Route {
     Services,
     /// The engine's mixer (`audio.*`).
     Audio,
-    /// The app: `earth.*`, the HUD (which the app does not draw), the script's own.
+    /// The app: `traced.*`, the HUD (which the app does not draw), the script's own.
     App,
 }
 
@@ -197,6 +201,7 @@ struct State {
     snapshot: Option<PathBuf>,
     root: PathBuf,
     agent: ureq::Agent,
+    paused: bool,
 }
 
 fn init(a: &Args) -> Result<State> {
@@ -274,6 +279,7 @@ fn init(a: &Args) -> Result<State> {
         snapshot: None,
         root: a.root.clone(),
         agent,
+        paused: false,
     };
     let launch = s.host.launch(s.config.width, s.config.height);
     if let Err(e) = s.game.host_messages(&mut s.core, &[launch]) {
@@ -355,7 +361,7 @@ fn exchange(s: &mut State, shared: &Shared, messages: &[Value], what: &str) {
         if s.audio.post(&p) {
             continue;
         }
-        // (The engine's HUD is not drawn: the app's interface is SwiftUI, from the `earth.*` family.)
+        // (The engine's HUD is not drawn: the app's interface is SwiftUI, from the `traced.*` family.)
         if p["t"] == "hud" {
             continue;
         }
@@ -497,8 +503,19 @@ fn run(a: Args, rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>) {
                         }
                     }
                 }
+                Cmd::Pause(p) => {
+                    s.paused = p;
+                    s.last = Instant::now();
+                }
                 Cmd::Quit => return,
             }
+        }
+        if s.paused {
+            // (Messages still reach the script, answers still come: a place can load while the map is shown.)
+            let answers = s.host.answers();
+            exchange(&mut s, &shared, &answers, "message");
+            std::thread::sleep(Duration::from_millis(16));
+            continue;
         }
         if let Err(e) = frame(&mut s, &shared) {
             shared.post(json!({ "t": "rt.error", "where": "render", "message": format!("{e:#}") }));
@@ -594,7 +611,7 @@ pub unsafe extern "C" fn ert_key(h: *mut ErtView, code: *const c_char, name: *co
     send(h, Cmd::Key(text(code), text(name), down));
 }
 
-/// Host-channel messages for the script (`earth.goto`, …): a JSON object or an array of them.
+/// Host-channel messages for the script (`traced.open`, …): a JSON object or an array of them.
 #[no_mangle]
 pub unsafe extern "C" fn ert_send(h: *mut ErtView, json: *const c_char) {
     let messages = match serde_json::from_str::<Value>(&text(json)) {
@@ -649,6 +666,12 @@ pub unsafe extern "C" fn ert_rendering(h: *mut ErtView, json: *const c_char) {
     }
 }
 
+/// Stops drawing (the map is shown) or starts again. Messages and downloads go on while paused.
+#[no_mangle]
+pub unsafe extern "C" fn ert_pause(h: *mut ErtView, paused: bool) {
+    send(h, Cmd::Pause(paused));
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn ert_destroy(h: *mut ErtView) {
     if h.is_null() {
@@ -690,7 +713,7 @@ mod tests {
         assert_eq!(route(&json!({ "t": "assets.cancel" })), Route::Services);
         assert_eq!(route(&json!({ "t": "net.fetch" })), Route::Services);
         assert_eq!(route(&json!({ "t": "audio.play" })), Route::Audio);
-        for t in ["earth.view", "earth.places", "earth.selected", "earth.pick", "earth.flight", "earth.status", "hud", "my.thing"] {
+        for t in ["traced.ready", "traced.view", "traced.exit", "traced.loading", "traced.status", "hud", "my.thing"] {
             assert_eq!(route(&json!({ "t": t })), Route::App, "{t}");
         }
         assert_eq!(route(&json!({})), Route::App);
@@ -700,11 +723,10 @@ mod tests {
     #[test]
     fn launch_has_params_and_caps() {
         let dir = std::env::temp_dir().join(format!("ert-launch-{}", std::process::id()));
-        let h = Host::new(dir, json!({ "at": "35.0,135.76,3000", "place": "threert/earth-sample-kyoto-tower/kyoto-tower" }), net::default_agent());
+        let h = Host::new(dir, json!({ "place": "threert/earth-sample-kyoto-tower/kyoto-tower" }), net::default_agent());
         let l = h.launch(1280, 720);
         assert_eq!(l["t"], "launch");
-        assert_eq!(l["caps"], json!(["assets", "earth"]));
-        assert_eq!(l["params"]["at"], "35.0,135.76,3000");
+        assert_eq!(l["caps"], json!(["assets", "traced"]));
         assert_eq!(l["params"]["place"], "threert/earth-sample-kyoto-tower/kyoto-tower");
         assert_eq!((l["params"]["width"].as_u64(), l["params"]["height"].as_u64()), (Some(1280), Some(720)));
         let none = Host::new(std::env::temp_dir(), Value::Null, net::default_agent()).launch(2, 1);
@@ -717,12 +739,12 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ert-host-{}", std::process::id()));
         let mut h = Host::new(dir.clone(), json!({}), net::default_agent());
         let rest = h.take(vec![
-            json!({ "t": "earth.view", "lat": 35 }),
+            json!({ "t": "traced.view", "lat": 35 }),
             json!({ "t": "assets.fetch", "id": "x", "url": "https://example.invalid/a", "path": "../etc/passwd" }),
             json!({ "t": "net.fetch", "id": "y", "url": "file:///etc/passwd" }),
-            json!({ "t": "earth.status" }),
+            json!({ "t": "traced.status" }),
         ]);
-        assert_eq!(rest.iter().map(|m| m["t"].as_str().unwrap()).collect::<Vec<_>>(), ["earth.view", "earth.status"]);
+        assert_eq!(rest.iter().map(|m| m["t"].as_str().unwrap()).collect::<Vec<_>>(), ["traced.view", "traced.status"]);
         let mut got = vec![];
         for _ in 0..100 {
             got.extend(h.answers());

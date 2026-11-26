@@ -222,7 +222,7 @@ export class Server {
     const build = this.places.last;
     if (build && !build.ok) lines.push(`The last build failed:\n${build.problems.slice(0, 5).map(p => `  ${p.file ?? ""}${p.line ? `:${p.line}` : ""} ${p.message}`).join("\n")}`);
     const load = this.loads.at(-1);
-    if (load && load.errors.length) lines.push(`The globe said when it loaded the place:\n${load.errors.slice(0, 3).map(e => `  ${e}`).join("\n")}`);
+    if (load && load.errors.length) lines.push(`The app said when it loaded the place:\n${load.errors.slice(0, 3).map(e => `  ${e}`).join("\n")}`);
     if (this.settings.meshyKey) lines.push("The user gave the app a Meshy key: `bun run meshy` uses it (it costs their credits: say how many models you are about to make).");
     else lines.push("There is no Meshy key in the app: `bun run meshy` works only with --mock (a placeholder); make models in code, or ask the user for a key (the app's Meshy panel).");
     return lines.join("\n");
@@ -330,7 +330,8 @@ export class Server {
         // What the globe shows: at the open place's start (or a camera in its frame), once the tiles are in.
         const path = typeof body.path === "string" ? body.path : join(BUILD, "shots", `shot-${Date.now()}.png`);
         mkdirSync(dirname(path), { recursive: true });
-        const answer = await this.ask({ t: "app.snapshot", path, wait: Number(body.wait ?? 2), ...(body.camera ? { camera: body.camera } : {}), place: body.place !== false }, 60_000);
+        const answer = await this.ask({ t: "app.snapshot", path, wait: Number(body.wait ?? 2), ...(body.camera ? { camera: body.camera } : {}), ...(body.view ? { view: body.view } : {}), place: body.place !== false }, 90_000);
+        if (answer?.error) return Response.json({ error: answer.error }, { status: 500 });
         return answer ? Response.json(answer) : Response.json({ error: "the app is not running (or did not answer)" }, { status: 503 });
       }
       case "/api/send": {

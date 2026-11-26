@@ -4,16 +4,19 @@
 import AppKit
 
 enum WindowShot {
-    static func compose(view: RenderNSView, frame: String, to path: String) -> (width: Int, height: Int) {
+    /// `frame`: a picture of `view` (the traced view's, or the map's), drawn under the window's other views; the
+    /// views in `hide` are hidden while those are drawn (a WKWebView and a Metal layer do not draw offscreen).
+    static func compose(over view: NSView, frame: String, hide: [NSView], to path: String) -> (width: Int, height: Int) {
         guard let window = view.window, let content = window.contentView else { return (0, 0) }
         let root = content.superview ?? content
         let bounds = root.bounds
         let scale = window.backingScaleFactor
         let (w, h) = (Int(bounds.width * scale), Int(bounds.height * scale))
-        view.isHidden = true
+        let was = hide.map(\.isHidden)
+        for v in hide { v.isHidden = true }
         let ui = root.bitmapImageRepForCachingDisplay(in: bounds)
         if let ui { root.cacheDisplay(in: bounds, to: ui) }
-        view.isHidden = false
+        for (v, h) in zip(hide, was) { v.isHidden = h }
         guard let out = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: w, pixelsHigh: h, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
                                          isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0) else { return (0, 0) }
         out.size = bounds.size

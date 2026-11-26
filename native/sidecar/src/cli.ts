@@ -2,13 +2,14 @@
 // to the running app's sidecar over HTTP (its port and token are in the build folder's server.json).
 //
 //   earthrt check               build the place, validate earthrt.json, have the app's globe load it; exit 1 on a problem
-//   earthrt shot [file.png]     save what the globe shows as a PNG: at the place's start, once its tiles are in
+//   earthrt shot [file.png]     save the open place path-traced (the app enters it) as a PNG, from its start
 //                  [--camera '{"position":[x,y,z],"target":[x,y,z]}']   from elsewhere, in the place's frame (m)
 //                  [--window]   the whole window: the globe with the app's panels over it
-//                  [--here]     where the camera is now (not flown to the place)
-//   earthrt logs [-n 50]        the globe's recent console lines and errors
+//                  [--map]      on the map instead (its GLB or fallback, as the web shows it)
+//                  [--here]     what the app shows now (not flown to the place)
+//   earthrt logs [-n 50]        the map's and the traced view's recent console lines and errors
 //   earthrt state               the place, its last build, the agent (JSON)
-//   earthrt send '<json>'       a host-channel message for the globe (`earth.goto`, `earth.time`, …: SPEC § 6)
+//   earthrt send '<json>'       a message for the map (`earth.goto`, `earth.time`, …) or the traced view (`traced.*`): SPEC § 6
 //   earthrt app '<json>'        a request for the app, as tests drive it: app.pointer {u, v, click | button, down},
 //                               app.key {key, hold?}, app.wheel {notches}, app.panel {panel, show}, app.prompt {text},
 //                               app.shot {path} (= shot --window), app.open {url} (an earthrt:// link), app.search {q},
@@ -66,9 +67,9 @@ switch (command) {
       for (const p of r.build.problems) console.log(`  ${where(p)}${p.message}`);
     } else console.log(`✓ built and validated in ${r.build.ms} ms`);
     if (r.build.ok) {
-      if (r.app === "loaded") console.log("✓ the app's globe loaded this build of the place");
+      if (r.app === "loaded") console.log("✓ the app shows this build of the place");
       else if (r.app === "not connected") console.log("· the app is not open: not loaded (build and manifest only)");
-      else console.log(`✗ the globe did not load it (${r.app})`);
+      else console.log(`✗ the app did not show it (${r.app})`);
     }
     for (const e of r.errors) console.log(`✗ ${e}`);
     for (const l of r.logs) console.log(`  console.${l.level}: ${l.text}`);
@@ -84,7 +85,7 @@ switch (command) {
     }
     const r = args.includes("--window")
       ? await windowShot(resolve(file ?? `shot-window-${Date.now()}.png`))
-      : await call("/api/shot", { ...(file ? { path: resolve(file) } : {}), ...(camera ? { camera } : {}), place: !args.includes("--here") });
+      : await call("/api/shot", { ...(file ? { path: resolve(file) } : {}), ...(camera ? { camera } : {}), place: !args.includes("--here"), ...(args.includes("--map") ? { view: "map" } : {}) });
     console.log(`${r.path} (${r.width}x${r.height})`);
     break;
   }
