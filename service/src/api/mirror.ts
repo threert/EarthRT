@@ -65,28 +65,44 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
     // only commits a place was registered at
     const v = await env.DB.prepare("SELECT 1 FROM versions WHERE repo = ? AND sha = ?").bind(repo.toLowerCase(), sha).first();
     if (!v) return new Response("not a registered place commit", { status: 404, headers: { ...base, "cache-control": "no-store" } });
-    let r = await fetch(rawUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
-    if (r.status === 404) return new Response("no such file at that commit", { status: 404, headers: { ...base, "cache-control": "public, max-age=300" } });
-    if (!r.ok) return new Response(`GitHub: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
-    let len = Number(r.headers.get("content-length") ?? NaN);
-    if (len > MAX) return new Response("file larger than 64 MiB", { status: 413, headers: base });
-    // a Git LFS pointer is small text: look at it, then fetch the real bytes
-    let body: ReadableStream | Uint8Array | null = r.body;
-    if (!(len > 200)) {
-      const bytes = new Uint8Array(await r.arrayBuffer());
-      const head = new TextDecoder().decode(bytes.subarray(0, 200));
-      if (head.startsWith("version https://git-lfs.github.com/spec/v1")) {
-        r = await fetch(mediaUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
-        if (!r.ok) return new Response(`GitHub LFS: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
-        len = Number(r.headers.get("content-length") ?? NaN);
-        if (len > MAX) return new Response("file larger than 64 MiB", { status: 413, headers: base });
-        body = r.body;
-        how = "github-lfs";
-      } else {
-        body = bytes;
-        len = bytes.length;
+    // `@release/<tag>/<asset>`: a file of a published GitHub release (city tiles too big for git); the registered
+    // commit's files name them, R2 keeps the first read
+    const rel = /^@release\/([A-Za-z0-9._+-]{1,128})\/([A-Za-z0-9._+-]{1,255})$/.exec(path);
+    if (path.startsWith("@release/") && !rel) return new Response("release paths are @release/<tag>/<asset>", { status: 400, headers: base });
+    let r: Response;
+    let body: ReadableStream | Uint8Array | null;
+    let len: number;
+    if (rel) {
+      r = await fetch(`${env.GITHUB_WEB ?? "https://github.com"}/${repo}/releases/download/${encodeURIComponent(rel[1])}/${encodeURIComponent(rel[2])}`, { headers: { "user-agent": UA }, redirect: "follow" });
+      if (r.status === 404) return new Response("no such release asset", { status: 404, headers: { ...base, "cache-control": "public, max-age=300" } });
+      if (!r.ok) return new Response(`GitHub: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
+      len = Number(r.headers.get("content-length") ?? NaN);
+      body = r.body;
+      how = "github-release";
+    } else {
+      r = await fetch(rawUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
+      if (r.status === 404) return new Response("no such file at that commit", { status: 404, headers: { ...base, "cache-control": "public, max-age=300" } });
+      if (!r.ok) return new Response(`GitHub: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
+      len = Number(r.headers.get("content-length") ?? NaN);
+      body = r.body;
+      how = "github";
+      // a Git LFS pointer is small text: look at it, then fetch the real bytes
+      if (!(len > 200)) {
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        const head = new TextDecoder().decode(bytes.subarray(0, 200));
+        if (head.startsWith("version https://git-lfs.github.com/spec/v1")) {
+          r = await fetch(mediaUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
+          if (!r.ok) return new Response(`GitHub LFS: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
+          len = Number(r.headers.get("content-length") ?? NaN);
+          body = r.body;
+          how = "github-lfs";
+        } else {
+          body = bytes;
+          len = bytes.length;
+        }
       }
-    } else how = "github";
+    }
+    if (len > MAX) { await r.body?.cancel().catch(() => {}); return new Response("file larger than 64 MiB", { status: 413, headers: base }); }
     if (body instanceof Uint8Array || !(len >= 0)) {
       const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body).arrayBuffer());
       if (bytes.length > MAX) return new Response("file larger than 64 MiB", { status: 413, headers: base });

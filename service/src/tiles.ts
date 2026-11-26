@@ -159,7 +159,20 @@ export async function handleTiles(req: Request, env: Env, ctx: ExecutionContext,
     const top = p === `/tiles/v1/${GEN}/terrain/top.c.erp`;
     const m = top ? null : TILE.exec(p);
     if (!top && !m) return new Response("not a tile address", { status: 404, headers: cors });
-    if (!top && m![1] !== GEN) return new Response(`unknown generation ${m![1]} (now ${GEN}: read /tiles/v1/meta.json)`, { status: 404, headers: cors });
+    const gen = top ? GEN : m![1];
+    if (gen !== GEN) {
+      // an older generation: its tile if it was made then (immutable), else the current generation's (a redirect, so a
+      // viewer holding an old meta.json keeps working); a newer or unknown one: 404
+      if (!/^g\d+$/.test(gen) || +gen.slice(1) > +GEN.slice(1)) return new Response(`unknown generation ${gen} (now ${GEN}: read /tiles/v1/meta.json)`, { status: 404, headers: cors });
+      const old = await env.TILES.get(`tiles/v1/${p.slice("/tiles/v1/".length)}`);
+      if (old) {
+        const b = new Uint8Array(await old.arrayBuffer());
+        const res = b.length ? new Response(b, { headers: { ...cors, "content-type": BIN, "cache-control": IMMUTABLE, "x-earthrt": "r2-old-gen" } }) : new Response(null, { status: 204, headers: { ...cors, "cache-control": IMMUTABLE, "x-earthrt": "r2-old-gen" } });
+        ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
+        return compressed(req, res);
+      }
+      return new Response(null, { status: 302, headers: { ...cors, location: p.replace(`/tiles/v1/${gen}/`, `/tiles/v1/${GEN}/`), "cache-control": "public, max-age=300", "x-earthrt": "old-gen-redirect" } });
+    }
     if (top) made = await topPack(env, ctx);
     else {
       const [, , layer, z, x, y, cap, enc] = m!;
