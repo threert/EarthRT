@@ -5,7 +5,7 @@ more cities, a better picture. Each pull request says which item it moves and up
 
 How work is judged:
 - **Looks** are judged by eye at fixed poses (the `poses` list in `tools/poses.json`), live, before and after side by
-  side (`out/pr-<name>/<pose>-before-after.jpg`), in the client and on the web. Offline zooms do not count.
+  side (`out/pr-<name>/<pose>-before-after.jpg`), in the app and on the web. Offline zooms do not count.
 - **Loading** is measured, not guessed: `tools/probe-web.ts` (first picture, tiles in flight, p50/p95 tile latency,
   bytes, GPU memory) and `tools/probe-app.ts` (frame p50/p95/p99, commit time, tiles a frame) on a fixed route.
 - The contracts are in [SPEC.md](SPEC.md); a change to one changes the spec in the same pull request.
@@ -14,7 +14,7 @@ How work is judged:
 
 | step | what | done when | status |
 | --- | --- | --- | --- |
-| S1 | `@earthrt/core`: geodesy, floating frame, tile scheme, ERT, terrain and building meshing, selection, scheduler, flights, sun, places | tests pass in Bun; the same code runs in QuickJS (the client's script) | **done** (tests); QuickJS check with S4 |
+| S1 | `@earthrt/core`: geodesy, floating frame, tile scheme, ERT, terrain and building meshing, selection, scheduler, flights, sun, places | tests pass in Bun; the same code runs in QuickJS (the app's script) | **done** (tests); QuickJS check with S4 |
 | S2 | the service (`service/`): trunk tiles made on request (terrain + land cover + buildings), meta, top pack; the registry (D1), the mirror, likes, hourly discovery; deployed at `earth.threert.dev` | `curl` a tile anywhere on Earth in < 2 s cold, < 100 ms warm; register a repository with `gh auth token`; its files served from the mirror | open |
 | S3 | the web engine (`web/`): orbit to aeroplane view, atmosphere, buildings, place markers, the place panel with versions and likes, GLB places, flights, the loading strategy | first picture < 2 s on a fresh profile; no holes while flying; a GLB place shows at its anchor | open |
 | S4 | the path-traced globe: engine `SkyAtmosphere.altitude`, `assets.fetch` (a library piece + `threert-render play`), texture slots freed; the globe's scene script (`app/`) streaming the trunk, places (glb, scene), flights, the `earth.*` messages (SPEC § 6) | in `threert-render play`: orbit to a street, traced, 60 fps at 1280 × 720 with MetalFX on an M3 Max; a flight Kyoto → San Francisco without holes | open |

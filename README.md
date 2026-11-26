@@ -29,7 +29,7 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/SPEC.
 
 | path | what |
 | --- | --- |
-| `packages/core` | `@earthrt/core`, plain TypeScript, no DOM: runs in browsers, Workers, Bun and the client's QuickJS |
+| `packages/core` | `@earthrt/core`, plain TypeScript, no DOM: runs in browsers, Workers, Bun and the app's QuickJS (ThreeRT's script engine) |
 | `service` | the Cloudflare Worker: trunk tiles, the places registry, the GitHub mirror, the web app's files |
 | `web` | the web engine (three.js) |
 | `app` | the globe's ThreeRT scene script (what the native app runs) |
