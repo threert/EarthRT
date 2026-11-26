@@ -7,7 +7,7 @@
 // at=lat,lon,alt[,heading,pitch], utc=<ISO or ms> or time=<local solar hour>, api=<url>, radius=<m>.
 import { BufferAttribute, BufferGeometry, Mesh, PerspectiveCamera, rendering, Scene } from "@threert/scene";
 import { defineGame, host, hud, type FrameContext } from "@threert/gameplay";
-import { ecefToGeodetic, Frame, geodeticToEcef, quatFromRows, validatePlace, ENTER_FROM, type PlaceManifest, type V3 } from "../../packages/core/src/index.ts";
+import { ecefToGeodetic, Frame, geodeticToEcef, placeRadius as placeRadiusOf, quatFromRows, validatePlace, ENTER_FROM, type PlaceManifest, type V3 } from "../../packages/core/src/index.ts";
 import { AssetsFetch, LocalFiles, netFetch, readText, type Files } from "./source.ts";
 import { makeMaterials, setHidden, type Materials } from "./materials.ts";
 import { cachePath, Surroundings, type Meta } from "./tiles.ts";
@@ -40,6 +40,7 @@ let status = "starting";
 let lastView = "", lastViewAt = -1, lastStatus = -1, lastLoading = -1, lastHud = -1;
 let frameMs = 0;
 let exitPosted = false;
+let city = false;
 
 // ------------------------------------------------------------------------------------------------ the tiles' meta
 let metaTry = 0, metaRetryAt = -1, metaAsking = false;
@@ -117,10 +118,13 @@ function open(src: PlaceSource, cam: GeoCamera | null, radius: number) {
   const cut = content.cutRadiusOf(m);
   tiles.cut = cut ? { x: 0, z: 0, r: cut } : null;
   setHidden(mats, cut ? [[0, 0, 0, cut]] : []);
-  tiles.open(frame, m.anchor.lat, m.anchor.lon);
+  // (a city's surroundings follow the camera: it is entered anywhere in it; a site's and a room's are its anchor's)
+  city = m.kind === "city";
+  const c0 = city && cam ? cam : m.anchor;
+  tiles.open(frame, c0.lat, c0.lon);
   const ground = tiles.groundNow(m.anchor.lat, m.anchor.lon);
   content.open(src, ground);
-  walker.reach = radius;
+  walker.reach = city ? Math.max(radius, content.cutRadiusOf(m) || placeRadiusOf(m)) + radius : radius;
   walker.exitAbove = m.enterFrom ?? ENTER_FROM[m.kind] ?? 120;
   if (cam) walker.setGeo(cam);
   else startCamera(m);
@@ -225,13 +229,14 @@ host.on("view", (m) => {
 function setView(w: number, h: number) {
   if (!(w > 0 && h > 0)) return;
   camera.aspect = w / h;
+  content.city.viewportHeight = h;
 }
 
 // ------------------------------------------------------------------------------------------------ setup and frames
 /** A triangle with each material, out of sight: the scene's first vertex colours and functions come with setup (a
  *  later first one rebuilds the scene). */
 function primeMaterials() {
-  for (const m of [mats.terrain, mats.buildings, mats.buildingsCut]) {
+  for (const m of [mats.terrain, mats.buildings, mats.buildingsCut, mats.water]) {
     const g = new BufferGeometry();
     g.positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 0, 1]);
     g.normals = new Float32Array([0, 1, 0, 0, 1, 0, 0, 1, 0]);
@@ -291,6 +296,13 @@ function frameFn(f: FrameContext<Record<string, never>>) {
   tiles.update();
   step = "content";
   content.update();
+  if (content.source && content.city.ts) content.city.update(walker.pos, (walker.fov * Math.PI) / 180);
+  // (a city's surroundings follow the camera, re-centred when it has gone a third of their radius)
+  if (city && tiles.at && f.dt > 0) {
+    const g = ecefToGeodetic(...frame.pointToEcef([walker.pos[0], 0, walker.pos[2]]));
+    const d = Math.hypot((g.lat - tiles.at.lat) * 111_320, (g.lon - tiles.at.lon) * 111_320 * Math.cos((g.lat * Math.PI) / 180));
+    if (d > tiles.radius / 3) tiles.center(g.lat, g.lon);
+  }
   if (content.source) {
     const g = tiles.hasGround(content.source.manifest.anchor.lat, content.source.manifest.anchor.lon) ? tiles.heightAt(content.source.manifest.anchor.lat, content.source.manifest.anchor.lon) : NaN;
     if (isFinite(g)) content.setGround(g);

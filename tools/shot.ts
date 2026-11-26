@@ -6,18 +6,8 @@
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { root, startLive } from "./lib/live.ts";
+import { PLACES } from "./places.ts";
 
-export const PLACES: Record<string, { place: string; at?: string; time?: string }> = {
-  // inside the back parlour, toward the garden and the andon
-  machiya: { place: "threert/earth-sample-gion-machiya/gion-machiya", time: "15" },
-  "machiya-dusk": { place: "threert/earth-sample-gion-machiya/gion-machiya", time: "18.6" },
-  // over the roofs of Karasuma street, 400 m north of the tower, looking south at it
-  tower: { place: "threert/earth-sample-kyoto-tower/kyoto-tower", at: "34.9912,135.7596,95,184,4", time: "15" },
-  "tower-lowpoly": { place: "threert/earth-sample-kyoto-tower-lowpoly/kyoto-tower", at: "34.9912,135.7596,95,184,4", time: "15" },
-  "tower-street": { place: "threert/earth-sample-kyoto-tower/kyoto-tower", at: "34.9893,135.75945,31.5,186,20", time: "15" },
-  "tower-air": { place: "threert/earth-sample-kyoto-tower/kyoto-tower", at: "34.9830,135.7550,250,35,-12", time: "15" },
-  cube: { place: "threert/earth-sample-cube/sample-cube", time: "15" },
-};
 
 const args = process.argv.slice(2);
 const val = (k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
@@ -28,7 +18,7 @@ const jobs: { name: string; launch: Record<string, string> }[] = [];
 for (const n of names) {
   const p = PLACES[n];
   if (!p) throw new Error(`no place ${n} (${Object.keys(PLACES).join(", ")})`);
-  jobs.push({ name: n, launch: { place: p.place, ...(p.at ? { at: p.at } : {}), ...(p.time ? { time: p.time } : {}) } });
+  jobs.push({ name: n, launch: { ...(p.place ? { place: p.place } : { dev: p.dev! }), ...(p.at ? { at: p.at } : {}), ...(p.time ? { time: p.time } : {}) } });
 }
 if (val("--place")) jobs.push({ name: val("--name") ?? "place", launch: { place: val("--place")! } });
 for (const j of jobs) {

@@ -122,24 +122,47 @@ export class Surroundings {
     return out;
   }
 
-  /** Opens the surroundings of a place whose frame is `frame`, anchored at lat, lon. */
+  /** Opens the surroundings of a place whose frame is `frame`, about lat, lon (its anchor, or for a city where the
+   *  camera is: `center` moves them later). */
   open(frame: Frame, lat: number, lon: number) {
     this.close();
     this.frame = frame;
-    if (!this.meta) return;
+    this.stats = { total: 0, done: 0, bytes: 0, tris: 0, maxAddMs: 0 };
+    this.center(lat, lon);
+  }
+
+  /** Where the cover is about. */
+  at: { lat: number; lon: number } | null = null;
+
+  /** The cover about another point: tiles it no longer needs go, the ones it now needs are asked for. */
+  center(lat: number, lon: number) {
+    if (!this.meta || !this.frame) return;
+    this.at = { lat, lon };
     const gen = this.meta.gen, bz = this.meta.buildings.zoom;
-    const want: { id: string; url: string; priority: number }[] = [];
-    const add = (layer: "t" | "b", key: string, z: number, priority: number) => {
-      const id = `${layer}:${key}`;
-      const url = `${this.base}/tiles/v1/${gen}/${layer === "t" ? "terrain" : "buildings"}/${key}.x.ert`;
-      this.tiles.set(id, { id, z, key, url, path: cachePath(url), state: "wanted", meshes: [], tris: 0, bytes: 0, priority });
-      want.push({ id, url: id, priority });
-    };
+    const next = new Map<string, { layer: "t" | "b"; key: string; z: number; priority: number }>();
     for (const c of this.cover(lat, lon)) {
-      add("t", c.key, c.z, 1e6 - c.d);
-      if (this.buildings && c.z === bz && c.d < this.radius) add("b", c.key, c.z, 1e6 - c.d - 1);
+      next.set(`t:${c.key}`, { layer: "t", key: c.key, z: c.z, priority: 1e6 - c.d });
+      if (this.buildings && c.z === bz && c.d < this.radius) next.set(`b:${c.key}`, { layer: "b", key: c.key, z: c.z, priority: 1e6 - c.d - 1 });
     }
-    this.stats = { total: want.length, done: 0, bytes: 0, tris: 0, maxAddMs: 0 };
+    for (const [id, t] of this.tiles) {
+      if (next.has(id)) continue;
+      for (const m of t.meshes) m.parent?.remove(m);
+      this.tiles.delete(id);
+      if (t.state === "ready" || t.state === "empty") this.stats.done--;
+      this.stats.total--;
+    }
+    this.queue = this.queue.filter((t) => this.tiles.has(t.id));
+    for (const [id, n] of next) {
+      const old = this.tiles.get(id);
+      if (old) {
+        old.priority = n.priority;
+        continue;
+      }
+      const url = `${this.base}/tiles/v1/${gen}/${n.layer === "t" ? "terrain" : "buildings"}/${n.key}.x.ert`;
+      this.tiles.set(id, { id, z: n.z, key: n.key, url, path: cachePath(url), state: "wanted", meshes: [], tris: 0, bytes: 0, priority: n.priority });
+      this.stats.total++;
+    }
+    const want = [...this.tiles.values()].filter((t) => t.state === "wanted").map((t) => ({ id: t.id, url: t.id, priority: t.priority }));
     this.sched.want(want);
   }
 

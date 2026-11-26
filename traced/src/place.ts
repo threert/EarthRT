@@ -7,6 +7,8 @@ import * as THREE from "@threert/scene";
 import { GLTFModel, preloadModel, readAsset, type Object3D, type Scene } from "@threert/scene";
 import { placeFrame, type PlaceManifest, type Quat, type V3 } from "../../packages/core/src/index.ts";
 import { exists, readText, type Files } from "./source.ts";
+import { CityTiles } from "./city.ts";
+import { cityFunctions } from "./materials.ts";
 import { cachePath } from "./tiles.ts";
 
 /** What `traced.open` names: a registry record, or a folder under the asset root (dev). */
@@ -37,10 +39,15 @@ export class PlaceContent {
   failed: string[] = [];
   private gen = 0;
 
-  constructor(private scene: Scene, private files: () => Files, private solarHour: (lon: number) => number) {}
+  /** The place's city tiles (content `tiles`), if it has them. */
+  city: CityTiles;
+
+  constructor(private scene: Scene, private files: () => Files, private solarHour: (lon: number) => number) {
+    this.city = new CityTiles(scene, files, cityFunctions());
+  }
 
   get ready() {
-    return this.total > 0 && this.done >= this.total && this.pending.length === 0;
+    return this.total > 0 && this.done >= this.total && this.pending.length === 0 && (!this.city.ts || this.city.ready);
   }
 
   /** Loads a place's content. `ground`: the terrain's height under the anchor (NaN if not known yet). */
@@ -50,7 +57,7 @@ export class PlaceContent {
     this.source = src;
     const m = src.manifest;
     this.height = this.heightFor(ground);
-    const work = m.content.filter((c) => c.type === "glb" || c.type === "scene");
+    const work = m.content.filter((c) => c.type === "glb" || c.type === "scene" || c.type === "tiles");
     this.total = work.length;
     this.done = 0;
     this.failed = [];
@@ -75,6 +82,9 @@ export class PlaceContent {
           const s = typeof c.scale === "number" ? [c.scale, c.scale, c.scale] : (c.scale ?? [1, 1, 1]);
           // (added two frames on: the parse runs on the engine's worker meanwhile, not in a frame's commit)
           this.pending.push({ at: this.frameNo + 2, path, local: { p: (c.position ?? [0, 0, 0]) as V3, q: eulerDeg(c.rotation ?? [0, 0, 0]), s: s as V3 }, name: `place:${src.id}:${c.uri}` });
+        } else if (c.type === "tiles") {
+          await this.city.open(src, c.uri, this.height);
+          if (gen !== this.gen) return this.city.close();
         } else if (c.type === "scene") {
           const path = await fetch(c.entry);
           const code = readText(path);
@@ -110,6 +120,7 @@ export class PlaceContent {
     if (Math.abs(h - this.height) < 0.01) return;
     this.height = h;
     for (const it of this.items) this.place(it);
+    this.city.height = h;
   }
 
   update() {
@@ -142,6 +153,7 @@ export class PlaceContent {
     for (const it of this.items) it.obj.parent?.remove(it.obj);
     this.items = [];
     this.pending = [];
+    this.city.close();
     this.source = null;
     this.total = this.done = 0;
   }

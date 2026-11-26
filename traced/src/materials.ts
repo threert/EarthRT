@@ -136,11 +136,46 @@ export const BUILDING_FN = new MaterialFunction("EarthBuildings", {
     }`,
 });
 
+/** Water of a city's tiles (material `water`): dark, very smooth, waved by travelling sines in its plane. */
+export const WATER_FN = new MaterialFunction("EarthWater", {
+  params: { WaveAmp: 1 },
+  helpers: HELPERS,
+  code: /* wgsl */ `
+    let lp = i.wp - i.op;
+    let fp = exp2(i.lod);
+    let t = er_tangent(i.n);
+    let b = cross(i.n, t);
+    let x = vec2<f32>(dot(lp, t), dot(lp, b));
+    var g = vec2<f32>(0.0);
+    let kw = (1.0 - smoothstep(2.0, 40.0, fp)) * $WaveAmp;
+    var dirs = array<vec2<f32>, 4>(vec2<f32>(0.8, 0.6), vec2<f32>(-0.4, 0.92), vec2<f32>(0.97, -0.26), vec2<f32>(-0.7, -0.71));
+    var lens = array<f32, 4>(3.1, 1.7, 0.9, 0.45);
+    for (var k = 0; k < 4; k++) {
+        let f = 6.2831853 / lens[k];
+        let ph = dot(x, dirs[k]) * f - sqrt(9.81 * f) * i.time;
+        g += dirs[k] * cos(ph) * 0.03;
+    }
+    let tn = normalize(vec3<f32>(-g.x * kw, -g.y * kw, 1.0));
+    o.normal = normalize(t * tn.x + b * tn.y + i.n * tn.z);
+    o.animated = true;
+    o.base = vec3<f32>(0.012, 0.022, 0.024) + o.base * 0.02;
+    o.roughness = mix(0.03, 0.12, smoothstep(5.0, 500.0, fp));
+    o.specular = 0.25;`,
+});
+
 export interface Materials {
   terrain: MeshStandardMaterial;
   buildings: MeshStandardMaterial;
   /** The same, cut out where a place replaces them (alpha-tested: only on tiles a place meets). */
   buildingsCut: MeshStandardMaterial;
+  /** A material with each function a city tile may bind, kept in the scene (a function the scene has not seen
+   *  rebuilds it when a model brings it). */
+  water: MeshStandardMaterial;
+}
+
+/** The functions bound on a city tile's own materials, by material name (SPEC § 5 tileset@2 `materials`). */
+export function cityFunctions() {
+  return { facade: BUILDING_FN.with(), water: WATER_FN.with() };
 }
 
 export function makeMaterials(): Materials {
@@ -150,7 +185,9 @@ export function makeMaterials(): Materials {
   buildings.shader = BUILDING_FN.with();
   const buildingsCut = new MeshStandardMaterial({ name: "earth-buildings-cut", color: 0xffffff, roughness: 0.85, vertexColors: true, alphaTest: 0.5 });
   buildingsCut.shader = BUILDING_FN.with();
-  return { terrain, buildings, buildingsCut };
+  const water = new MeshStandardMaterial({ name: "earth-water", color: 0xffffff, roughness: 0.05 });
+  water.shader = WATER_FN.with();
+  return { terrain, buildings, buildingsCut, water };
 }
 
 /** The places whose buildings are cut (anchor in the frame, radius): at most four, the nearest. */
