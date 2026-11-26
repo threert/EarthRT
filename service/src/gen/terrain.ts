@@ -23,7 +23,50 @@ export interface LandCover {
   readonly src: string[];
 }
 
+/** Lakes whose surface is below sea level (the rule "water below 0 m is the sea, at 0 m" would lift them). */
+export const LAKES = [
+  { name: "Dead Sea", s: 30.9, n: 31.85, w: 35.3, e: 35.65, h: -430 },
+  { name: "Sea of Galilee", s: 32.68, n: 32.93, w: 35.5, e: 35.67, h: -212 },
+  { name: "Caspian Sea", s: 36.4, n: 47.3, w: 46.3, e: 55.2, h: -28 },
+  { name: "Lake Assal", s: 11.6, n: 11.72, w: 42.35, e: 42.5, h: -155 },
+  { name: "Salton Sea", s: 33.0, n: 33.55, w: -116.2, e: -115.5, h: -71 },
+  { name: "Kati Thanda–Lake Eyre", s: -29.7, n: -27.8, w: 136.7, e: 138.0, h: -15 },
+];
+export function lakeOf(lat: number, lon: number) {
+  for (const l of LAKES) if (lat >= l.s && lat <= l.n && lon >= l.w && lon <= l.e) return l;
+  return null;
+}
+
 /** Terrarium tile → heights in metres (256 × 256), null where the tile is missing. */
+/** Japan's GSI DEM (10 m, "dem_png", z ≤ 14; numerical value × 0.01 m, 2²³ = no data): finer than Terrarium there. */
+export const GSI = "https://cyberjapandata.gsi.go.jp/xyz/dem_png";
+const GSI_MIN_Z = 8;
+const inGsi = (z: number, x: number, y: number) => {
+  if (z < GSI_MIN_Z || z > 14) return false;
+  const w = (x / 2 ** z) * 360 - 180, e = ((x + 1) / 2 ** z) * 360 - 180, n = tileYToLat(y, z), s = tileYToLat(y + 1, z);
+  return e > 122 && w < 154 && n > 20 && s < 46;
+};
+
+/** Heights of a source tile (256²): Terrarium, with GSI's pixels where it has data. `used` collects source names. */
+export async function sourceHeights(up: Upstream, z: number, x: number, y: number, used?: Set<string>): Promise<Float32Array | null> {
+  const [t, g] = await Promise.all([terrariumHeights(up, z, x, y), inGsi(z, x, y) ? up.get(`${GSI}/${z}/${x}/${y}.png`) : Promise.resolve(null)]);
+  if (t) used?.add("terrarium");
+  if (!t || !g) return t;
+  let img;
+  try { img = await decodePng(g); } catch { return t; }
+  if (img.width !== 256 || img.height !== 256) return t;
+  const d = img.data, c = img.channels;
+  let any = false;
+  for (let i = 0; i < 256 * 256; i++) {
+    const v = d[i * c] * 65536 + d[i * c + 1] * 256 + d[i * c + 2];
+    if (v === 8388608) continue;
+    t[i] = (v < 8388608 ? v : v - 16777216) * 0.01;
+    any = true;
+  }
+  if (any) used?.add("gsi");
+  return t;
+}
+
 export async function terrariumHeights(up: Upstream, z: number, x: number, y: number): Promise<Float32Array | null> {
   const png = await up.get(`${TERRARIUM}/${z}/${x}/${y}.png`);
   if (!png) return null;
@@ -59,9 +102,10 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
   const wrapX = (tx: number) => ((tx % tiles) + tiles) % tiles;
   const clampY = (ty: number) => Math.max(0, Math.min(tiles - 1, ty));
   const want = new Map<string, Promise<Float32Array | null>>();
+  const used = new Set<string>();
   for (const dy of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
     const tx = wrapX(x + dx), ty = clampY(y + dy), k = `${tx}/${ty}`;
-    if (!want.has(k)) want.set(k, terrariumHeights(up, z, tx, ty));
+    if (!want.has(k)) want.set(k, sourceHeights(up, z, tx, ty, used));
   }
   const got = new Map<string, Float32Array | null>();
   await Promise.all([...want].map(async ([k, p]) => got.set(k, await p)));
@@ -81,32 +125,41 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       elev[r * W + c] = t[py * 256 + px];
     }
   }
-  // land cover at the pixels' centres
+  // the pixels' centres
+  const rowLat = new Float64Array(W), colLon = new Float64Array(W);
+  for (let r = 0; r < W; r++) rowLat[r] = tileYToLat(y + (lo + r + 0.5) / 256, z);
+  for (let c = 0; c < W; c++) { let lon = ((x + (lo + c + 0.5) / 256) / tiles) * 360 - 180; if (lon >= 180) lon -= 360; if (lon < -180) lon += 360; colLon[c] = lon; }
+  const lakeAt = (r: number, c: number) => lakeOf(rowLat[r], colLon[c]);
+  const anyLake = LAKES.some((l) => l.s < rowLat[0] && l.n > rowLat[W - 1] && l.w < colLon[W - 1] && l.e > colLon[0]);
+  // land cover at them
   let cover: Uint8Array | null = null;
   if (lc) {
     const lons = new Float64Array(W * W), lats = new Float64Array(W * W);
-    const rowLat = new Float64Array(W), colLon = new Float64Array(W);
-    for (let r = 0; r < W; r++) rowLat[r] = tileYToLat(y + (lo + r + 0.5) / 256, z);
-    for (let c = 0; c < W; c++) { let lon = ((x + (lo + c + 0.5) / 256) / tiles) * 360 - 180; if (lon >= 180) lon -= 360; if (lon < -180) lon += 360; colLon[c] = lon; }
     for (let r = 0; r < W; r++) for (let c = 0; c < W; c++) { lats[r * W + c] = rowLat[r]; lons[r * W + c] = colLon[c]; }
-    // the deep sea needs no land cover: only pixels above −40 m are looked up
+    // the deep sea needs no land cover: only pixels above −40 m are looked up (and every pixel of a low lake)
     const only = new Uint8Array(W * W);
     let any = false;
-    for (let i = 0; i < W * W; i++) if (elev[i] > -40) { only[i] = 1; any = true; }
+    for (let r = 0; r < W; r++) for (let c = 0; c < W; c++) {
+      const i = r * W + c;
+      if (elev[i] > -40 || (anyLake && lakeAt(r, c))) { only[i] = 1; any = true; }
+    }
     cover = any ? await lc.sample(lons, lats, 360 / tiles / 256, only) : new Uint8Array(W * W);
   }
   const t2 = Date.now();
   // per pixel: is it water, and the surface height
   const isWater = new Uint8Array(W * W), surf = new Float32Array(W * W);
-  for (let i = 0; i < W * W; i++) {
+  for (let r = 0; r < W; r++) for (let c = 0; c < W; c++) {
+    const i = r * W + c;
     const e = elev[i], v = cover ? cover[i] : 0;
+    const lake = anyLake ? lakeAt(r, c) : null;
     let w: boolean;
-    if (v === 80) w = true;
+    if (lake) w = v === 80 || (v === 0 && e <= lake.h + 0.5); // a lake below sea level: its own surface
+    else if (v === 80) w = true;
     else if (v === 0) w = e < 0; // no land cover: the sea where it is below sea level
-    else w = false; // land, even below sea level (polders, the Dead Sea's shores)
+    else w = false; // land, even below sea level (polders)
     isWater[i] = w ? 1 : 0;
-    // the sea's surface at 0 m; inland water (WorldCover says water and the ground is above sea level) at its level
-    surf[i] = w ? (e < 0 ? 0 : e) : e;
+    // the sea's surface at 0 m; inland water above sea level at its own height; low lakes at theirs
+    surf[i] = !w ? e : lake ? lake.h : e < 0 ? 0 : e;
   }
   // vertices (bordered: (n + 2)²): means over the 4 × 4 pixels about each corner
   const nb = n + 2;
@@ -164,7 +217,7 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       }
     }
   }
-  const src = ["terrarium", ...(lc ? lc.src : [])];
+  const src = [...(used.size ? used : ["terrarium"]), ...(lc ? lc.src : [])];
   const out = encodeTerrainCompact({ key, n, heights, cls, rgb, water, normals, skirt: skirtFor(key, n), src });
   if (timings) { timings.fetch = t1 - t0; timings.landcover = t2 - t1; timings.build = Date.now() - t2; }
   return out;

@@ -16,7 +16,7 @@
     "run_worker_first": ["/tiles/*", "/api/*", "/api", "/p/*"]
   },
   "r2_buckets": [{ "binding": "TILES", "bucket_name": "earthrt-tiles" }],
-  "d1_databases": [{ "binding": "DB", "database_name": "earthrt", "database_id": "PLACEHOLDER", "migrations_dir": "migrations" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "earthrt", "database_id": "f59a1515-999d-4d28-afaf-ebbc19fac26e", "migrations_dir": "migrations" }],
   "vars": { "APP_HOST": "earth.threert.dev", "FILES_HOST": "earth-files.threert.dev" },
   "triggers": { "crons": ["17 * * * *"] },
   "limits": { "cpu_ms": 30000 },
@@ -26,7 +26,7 @@
     "local": {
       "vars": { "APP_HOST": "", "FILES_HOST": "" },
       "r2_buckets": [{ "binding": "TILES", "bucket_name": "earthrt-tiles" }],
-      "d1_databases": [{ "binding": "DB", "database_name": "earthrt", "database_id": "PLACEHOLDER", "migrations_dir": "migrations" }]
+      "d1_databases": [{ "binding": "DB", "database_name": "earthrt", "database_id": "f59a1515-999d-4d28-afaf-ebbc19fac26e", "migrations_dir": "migrations" }]
     }
   }
 }

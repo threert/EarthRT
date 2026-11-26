@@ -59,7 +59,7 @@ All under the service host (`https://earth.threert.dev` in v1).
 | `/tiles/v1/meta.json` | `{ v, gen, terrain: { maxZoom, n, skirt }, buildings: { zoom, regions: [{ name, bbox }] }, attribution: [..] }` (`skirt` is a maxZoom tile's; each tile's header has its own; `bbox` is `[west, south, east, north]`) | 5 min |
 | `/tiles/v1/<gen>/terrain/<z>/<x>/<y>.<enc>.ert` | a terrain tile, `enc` = `c` (compact) or `x` (expanded) | immutable |
 | `/tiles/v1/<gen>/terrain/cap/<n\|s>.<enc>.ert` | a polar cap | immutable |
-| `/tiles/v1/<gen>/terrain/top.c.erp` | z0–z2 compact, packed (21 tiles + 2 caps) | immutable |
+| `/tiles/v1/<gen>/terrain/top.c.erp` | z0–z1 compact, packed (5 tiles + 2 caps; each file's header names its key) | immutable |
 | `/tiles/v1/<gen>/buildings/<z>/<x>/<y>.<enc>.ert` | a buildings tile; `204` where there is no building data | immutable |
 
 `gen` is the generation of the generator (`g1`, `g2`, …): a change to what tiles hold bumps it, and clients read it

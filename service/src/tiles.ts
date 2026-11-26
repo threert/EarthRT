@@ -8,11 +8,14 @@ import { WorkerUpstream } from "./worker-upstream.ts";
 import type { Env } from "./env.ts";
 
 /** The generation of the generator: bump when what tiles hold changes (SPEC § 3). */
-export const GEN = "g1";
+export const GEN = "g4";
 export const MAX_Z = 14;
+/** The top pack: z0 … this and the caps (z2 too would be 315 KB with brotli). */
+export const TOP_MAX_Z = 1;
 
 export const ATTRIBUTION = [
   "Terrain: Mapzen Terrain Tiles on AWS (SRTM, GMTED, ETOPO1, NED and others; https://github.com/tilezen/joerd/blob/master/docs/attribution.md)",
+  "Terrain in Japan: Geospatial Information Authority of Japan (GSI tiles, 国土地理院 標高タイル)",
   "Land cover: © ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium (CC BY 4.0)",
   "Buildings: © OpenStreetMap contributors (ODbL), via Protomaps",
 ];
@@ -122,7 +125,7 @@ async function topPack(env: Env, ctx: ExecutionContext): Promise<Made> {
     const r2 = await fromR2(env, k);
     if (r2 !== undefined) return { bytes: r2, how: "r2" };
     const keys: TileKey[] = [];
-    for (let z = 0; z <= 2; z++) for (let y = 0; y < 2 ** z; y++) for (let x = 0; x < 2 ** z; x++) keys.push({ z, x, y });
+    for (let z = 0; z <= TOP_MAX_Z; z++) for (let y = 0; y < 2 ** z; y++) for (let x = 0; x < 2 ** z; x++) keys.push({ z, x, y });
     keys.push({ cap: "n" }, { cap: "s" });
     const files = await Promise.all(keys.map((t) => terrainCompact(env, ctx, t, `terrain/${"cap" in t ? `cap/${t.cap}` : `${t.z}/${t.x}/${t.y}`}.c.ert`)));
     const bytes = encodeErp(files.map((f) => f.bytes!));
@@ -149,7 +152,7 @@ export async function handleTiles(req: Request, env: Env, ctx: ExecutionContext,
     const h = new Headers(hit.headers);
     h.set("x-earthrt", "edge");
     h.set("server-timing", `total;dur=${Date.now() - t0}`);
-    return new Response(req.method === "HEAD" ? null : hit.body, { status: hit.status, headers: h });
+    return compressed(req, new Response(req.method === "HEAD" ? null : hit.body, { status: hit.status, headers: h }));
   }
   let made: Made;
   try {
@@ -183,5 +186,19 @@ export async function handleTiles(req: Request, env: Env, ctx: ExecutionContext,
   else res = new Response(made.bytes, { headers: { ...headers, "content-type": BIN } });
   ctx.waitUntil(caches.default.put(cacheKey, res.clone()));
   res.headers.set("server-timing", [`total;dur=${Date.now() - t0}`, made.timing].filter(Boolean).join(", "));
-  return req.method === "HEAD" ? new Response(null, { status: res.status, headers: res.headers }) : res;
+  return compressed(req, req.method === "HEAD" ? new Response(null, { status: res.status, headers: res.headers }) : res);
+}
+
+/** Tiles compress to about 40 % (the top pack 886 → 264 KB with br): the runtime encodes a body whose response
+ *  names an encoding. The cache keeps the plain bytes. */
+function compressed(req: Request, res: Response): Response {
+  if (res.status !== 200) return res;
+  const ae = req.headers.get("accept-encoding") ?? "";
+  const enc = /\bbr\b/.test(ae) ? "br" : /\bgzip\b/.test(ae) ? "gzip" : null;
+  const h = new Headers(res.headers);
+  h.append("vary", "accept-encoding");
+  if (!enc) return new Response(res.body, { status: res.status, headers: h });
+  h.set("content-encoding", enc);
+  h.delete("content-length");
+  return new Response(res.body, { status: res.status, headers: h });
 }
