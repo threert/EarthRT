@@ -75,9 +75,6 @@ export class Scheduler<T> {
   private finish(id: string, slot: Slot<T>, r: { result?: T; error?: unknown }) {
     if (slot.signal.aborted || this.inFlight.get(id) !== slot) return;
     this.inFlight.delete(id);
-    // (done: not asked for again until the next `want` lists it; a transport that answers at once would otherwise
-    // be asked again from here, for ever)
-    this.wanted.delete(id);
     if (r.error !== undefined) {
       const f = this.failures.get(id) ?? { n: 0, until: 0 };
       f.n++;
