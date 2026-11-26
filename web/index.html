@@ -16,19 +16,23 @@
 (function () {
   var q = new URLSearchParams(location.search), api = (q.get("api") || "").replace(/\/+$/, "");
   if (!/^https?:\/\//.test(api)) api = "";
+  // in the app the page is not on the service's origin, and the service's files come through its ert:// scheme
+  var app = q.get("host") === "app";
+  if (app && !api) api = "https://earth.threert.dev";
   if (q.get("tiles") === "dev") api = "#";
+  var base = app && api !== "#" ? api.replace(/^https:\/\//, "ert://") : api;
   var t0 = performance.now();
-  if (api && api !== "#") {
+  if (api && api !== "#" && !app) {
     var l = document.createElement("link"); l.rel = "preconnect"; l.href = api; l.crossOrigin = ""; document.head.appendChild(l);
   }
   var none = Promise.resolve(null);
-  var meta = api === "#" ? none : fetch(api + "/tiles/v1/meta.json", { priority: "high" }).then(function (r) {
+  var meta = api === "#" ? none : fetch(base + "/tiles/v1/meta.json", { priority: "high" }).then(function (r) {
     var ct = r.headers.get("content-type") || "";
     return r.ok && ct.indexOf("json") >= 0 ? r.json() : null;
   }).catch(function () { return null; });
   var top = meta.then(function (m) {
     if (!m || !m.gen) return null;
-    return fetch(api + "/tiles/v1/" + m.gen + "/terrain/top.c.erp", { priority: "high" }).then(function (r) { return r.ok ? r.arrayBuffer() : null; });
+    return fetch(base + "/tiles/v1/" + m.gen + "/terrain/top.c.erp", { priority: "high" }).then(function (r) { return r.ok ? r.arrayBuffer() : null; });
   }).catch(function () { return null; });
   window.__ert = { t0: t0, meta: meta, top: top, api: api === "#" ? "" : api };
 })();
@@ -125,6 +129,11 @@ button { cursor: pointer; }
 #time-now { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--line); background: transparent; font-size: 11px; }
 
 #toast { position: fixed; left: 50%; top: 70px; transform: translateX(-50%); padding: 10px 14px; }
+/* embedded (SPEC § 6.1): the host draws the interface; markers stay (they are the map's); the app shows the
+   attributions itself, a page that frames the map shows them here */
+.embedded #top, .embedded #destinations, .embedded #fly-form, .embedded #panel, .embedded #flight, .embedded #toast,
+.embedded #readout, .embedded #timebox, .embedded #veil, .embedded-app #attribution { display: none !important; }
+.no-labels .marker span { display: none; }
 #debug { position: fixed; left: 12px; bottom: 40px; padding: 8px 10px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre; pointer-events: none; }
 
 @media (max-width: 640px) {

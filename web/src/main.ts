@@ -13,6 +13,8 @@ import { Hud } from "./ui/hud.ts";
 import { Places } from "./places/places.ts";
 import { FlightRunner } from "./flight.ts";
 import { Ui } from "./ui/ui.ts";
+import { connectHost, serviceUrl } from "./host.ts";
+import { Embed } from "./embed.ts";
 
 declare global {
   interface Window {
@@ -40,6 +42,12 @@ export class App {
   /** Simulated UTC time (ms) and whether it follows the clock. */
   time = Date.now();
   liveTime = true;
+  /** Scene seconds a second while the time is not live (the host's `earth.time` rate). */
+  timeRate = 0;
+  /** The host's link (SPEC § 6.1), when embedded. */
+  embed: Embed | null = null;
+  paused = false;
+  settings: { sse?: number; buildings: boolean; labels: boolean; quality: "web" | "app" } = { buildings: true, labels: true, quality: "web" };
   fov = 45;
   frameNo = 0;
   holes = 0;
@@ -52,16 +60,25 @@ export class App {
   mobile = matchMedia("(pointer: coarse)").matches;
   dpr = 1;
   /** 6 px on desktops, 8 on phones (slower networks, smaller GPUs), unless the page says otherwise. */
-  get sse() { return this.launch.sse ?? (this.mobile ? 8 : SSE_THRESHOLD); }
+  get sse() { return this.settings.sse ?? this.launch.sse ?? (this.settings.quality === "app" ? 4 : this.mobile ? 8 : SSE_THRESHOLD); }
+  /** A service URL as this page fetches it (in the app: through its `ert://` scheme). */
+  svc(url: string) { return serviceUrl(url, this.launch.host === "app"); }
   private width = 1;
   private height = 1;
 
   constructor() {
     this.launch = parseLaunch(location.search);
     this.canvas = document.getElementById("globe") as HTMLCanvasElement;
-    this.globe = new Globe(this.canvas, this.mobile ? 0 : 4);
+    // in the app the page is snapshotted by the host's tests (WKWebView.takeSnapshot): keep the drawing buffer
+    this.globe = new Globe(this.canvas, this.mobile ? 0 : 4, this.launch.host === "app");
     this.pool = new TilePool();
+    this.pool.fetchInMain = this.launch.host === "app";
     this.hud = new Hud(this.launch.debug);
+    const link = connectHost(this.launch.host, this.launch.parent);
+    if (link) {
+      this.embed = new Embed(this, link);
+      document.documentElement.classList.add("embedded", `embedded-${link.kind}`);
+    }
   }
 
   async start() {
@@ -81,6 +98,7 @@ export class App {
       ground: (lat, lon) => this.tiles.groundAt(lat, lon),
       floor: (lat, lon) => this.floorAt(lat, lon),
       changed: () => {},
+      click: (x, y) => this.embed?.pick(x, y),
     }, this.initialView());
     this.places = new Places(this);
     this.flight = new FlightRunner(this);
@@ -103,6 +121,34 @@ export class App {
     if (this.launch.place) this.places.open(this.launch.place, true);
     if (this.launch.fly) this.flight.startFrom(this.launch.fly.from, this.launch.fly.to);
     if (this.launch.dev) this.places.loadDev(this.launch.dev);
+    this.embed?.ready();
+  }
+
+  /** The host covers the map (the traced view): no drawing, no fetching. */
+  setPaused(p: boolean) {
+    if (p === this.paused) return;
+    this.paused = p;
+    if (!p) {
+      this.last = performance.now();
+      requestAnimationFrame(this.frame);
+    }
+  }
+
+  /** The host's settings (SPEC § 6.1): refinement, buildings, labels, and the app's budgets. */
+  applySettings(s: { sse?: number; buildings?: boolean; labels?: boolean; quality?: "web" | "app" }) {
+    if (s.sse !== undefined) this.settings.sse = Math.max(0.5, Math.min(32, s.sse));
+    if (s.buildings !== undefined) this.settings.buildings = s.buildings;
+    if (s.labels !== undefined) {
+      this.settings.labels = s.labels;
+      document.documentElement.classList.toggle("no-labels", !s.labels);
+    }
+    if (s.quality) {
+      this.settings.quality = s.quality;
+      const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+      // the app: a GPU budget of its own (1 GiB), the screen's full resolution, finer refinement (sse 4)
+      this.tiles.gpuBudget = s.quality === "app" ? 1024 << 20 : gpuBudgetFor(deviceMemory, this.mobile);
+      this.resize();
+    }
   }
 
   private async findSource(boot: Window["__ert"]): Promise<TileSource> {
@@ -110,7 +156,7 @@ export class App {
     let meta: TileMeta | null = null;
     if (!this.launch.devTiles) {
       try {
-        meta = api && api !== boot?.api ? await fetch(`${api}/tiles/v1/meta.json`).then((r) => (r.ok ? r.json() : null)) : await (boot?.meta ?? null);
+        meta = api && api !== boot?.api ? await fetch(this.svc(`${api}/tiles/v1/meta.json`)).then((r) => (r.ok ? r.json() : null)) : await (boot?.meta ?? null);
       } catch { meta = null; }
     }
     if (meta && meta.gen && meta.terrain) return this.serviceSource(meta, api);
@@ -125,7 +171,7 @@ export class App {
     if (this.source.dev || performance.now() - this.staleAt < 10_000) return;
     this.staleAt = performance.now();
     const api = this.launch.api || "";
-    const meta = await fetch(`${api}/tiles/v1/meta.json`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as TileMeta | null;
+    const meta = await fetch(this.svc(`${api}/tiles/v1/meta.json`), { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as TileMeta | null;
     if (!meta?.gen || meta.gen === this.source.meta.gen) return;
     console.info(`EarthRT: tiles moved from ${this.source.meta.gen} to ${meta.gen}`);
     this.source = this.serviceSource(meta, api);
@@ -135,8 +181,9 @@ export class App {
   }
 
   private serviceSource(meta: TileMeta, api: string): TileSource {
-    const base = `${api}/tiles/v1/${meta.gen}`;
-    return { meta, dev: false, cache: `earthrt-tiles-${meta.gen}`, url: (layer, key) => `${base}/${layer}/${key}.c.ert` };
+    const base = this.svc(`${api}/tiles/v1/${meta.gen}`);
+    // (in the app its own disk cache keeps the files: Cache Storage takes http(s) only)
+    return { meta, dev: false, cache: this.launch.host === "app" ? null : `earthrt-tiles-${meta.gen}`, url: (layer, key) => `${base}/${layer}/${key}.c.ert` };
   }
 
   private async dropOldCaches() {
@@ -189,7 +236,7 @@ export class App {
     const w = Math.max(1, window.innerWidth), h = Math.max(1, window.innerHeight);
     this.width = w;
     this.height = h;
-    this.dpr = this.launch.dpr ?? Math.min(window.devicePixelRatio || 1, this.mobile ? 2 : 2);
+    this.dpr = this.launch.dpr ?? Math.min(window.devicePixelRatio || 1, this.settings.quality === "app" ? 3 : 2);
     this.globe.resize(w, h, this.dpr);
     // the vertical field of view: 45° in landscape; in portrait, wide enough to keep a landscape's sideways view
     const a = w / h;
@@ -210,11 +257,13 @@ export class App {
   }
 
   private frame = (now: number) => {
+    if (this.paused) return;
     requestAnimationFrame(this.frame);
     const dt = Math.min(0.1, (now - this.last) / 1000);
     this.last = now;
     this.frameNo++;
     if (this.liveTime) this.time = Date.now();
+    else if (this.timeRate) this.time += dt * 1000 * this.timeRate;
     else if (this.ui?.timePlaying) this.time += dt * 3600_000 * this.ui.timeSpeed;
     this.controls.update(dt);
     this.flight.update(dt);
@@ -227,7 +276,7 @@ export class App {
     this.globe.setSun(sunDirection(this.time));
     this.globe.buildingsMat.uniforms.uHoleCount.value = this.places.holes(this.globe.buildingsMat.uniforms.uHoles.value);
     this.globe.terrainMat.uniforms.uHoleCount.value = this.places.holes(this.globe.terrainMat.uniforms.uHoles.value, "terrain");
-    this.globe.render(f.terrain, f.buildings, (now - this.started) / 1000);
+    this.globe.render(f.terrain, this.settings.buildings ? f.buildings : [], (now - this.started) / 1000);
     if (f.hole) this.holes++;
     if (f.coarse > 0) this.coarseFrames++;
     if (this.firstGlobeMs < 0 && !f.hole) {
@@ -238,6 +287,7 @@ export class App {
     this.record?.push({ t: now, hole: f.hole, coarse: f.coarse, shown: f.terrain.length, gpu: this.tiles.gpuBytes, inFlight: this.tiles.stats.inFlight, alt: geodetic(s.pos).h });
     this.ui.frame(s);
     this.hud.update(this, dt);
+    this.embed?.frame(now, dt);
   };
 
   /** Fly the camera to a view (search results, places, destinations). */

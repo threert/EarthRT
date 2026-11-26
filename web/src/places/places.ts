@@ -3,6 +3,7 @@
 // frame through the floating origin, and the trunk's buildings hidden inside those that replace them. `scene`
 // content is not run on the web in v1: its place shows a marker and "Open in ThreeRT".
 import * as THREE from "three";
+import { serviceUrl } from "../host.ts";
 import { chooseVersions, ecefToGeodetic, geodeticToEcef, haversine, placeFrame, placeRadius, topicBase, VISIBLE_FROM, type PlaceManifest, type PlaceRecord } from "@earthrt/core";
 import { centerTarget, geodetic, type CamState } from "../camera/math.ts";
 import type { App } from "../main.ts";
@@ -59,7 +60,7 @@ export class Places {
   private loader: Promise<import("three/examples/jsm/loaders/GLTFLoader.js").GLTFLoader> | null = null;
 
   constructor(private readonly app: App) {
-    this.api = `${app.launch.api || ""}/api/v1`;
+    this.api = serviceUrl(`${app.launch.api || ""}/api/v1`, app.launch.host === "app");
   }
 
   private async getJson<T>(path: string): Promise<T> {
@@ -72,22 +73,27 @@ export class Places {
 
   async search(q: string): Promise<PlaceRecord[]> {
     const r = await this.getJson<{ places: PlaceRecord[] }>(`/places?q=${encodeURIComponent(q)}&limit=12`);
-    for (const p of r.places) this.records.set(p.id, p);
+    for (const p of r.places) this.keep(p);
     return r.places;
+  }
+
+  /** A record from the registry, its files' base through the app's URL scheme when hosted by the app. */
+  private keep(p: PlaceRecord): PlaceRecord {
+    p.files = serviceUrl(p.files, this.app.launch.host === "app");
+    this.records.set(p.id, p);
+    return p;
   }
 
   async get(id: string): Promise<PlaceRecord> {
     if (this.dev?.id === id) return this.dev;
-    const p = await this.getJson<PlaceRecord>(`/places/${id}`);
-    this.records.set(p.id, p);
-    return p;
+    return this.keep(await this.getJson<PlaceRecord>(`/places/${id}`));
   }
 
   /** Every version of a topic (its base and eras), best first. */
   async versions(topic: string): Promise<PlaceRecord[]> {
     if (this.dev && topicBase(this.dev.topic) === topicBase(topic)) return [this.dev];
     const r = await this.getJson<{ places: PlaceRecord[] }>(`/topics/${encodeURIComponent(topicBase(topic))}`);
-    for (const p of r.places) this.records.set(p.id, p);
+    for (const p of r.places) this.keep(p);
     return r.places;
   }
 
@@ -97,6 +103,29 @@ export class Places {
     this.choice[topicBase(p.topic)] = p.id;
     saveChoice(this.choice);
     this.rechoose();
+  }
+
+  /** The host's choice for a topic (it keeps them; SPEC § 6.1 `earth.choose`). */
+  setChoice(topic: string, id: string) {
+    this.choice[topicBase(topic)] = id;
+    delete this.visitChoice[topicBase(topic)];
+    this.rechoose();
+  }
+
+  /** A place under development from the host (`earth.dev`): its files at `base`, its manifest given; sent again after
+   *  each save, which reloads it. */
+  showDev(base: string, m: PlaceManifest) {
+    const dir = base.endsWith("/") ? base : `${base}/`;
+    const old = this.dev && this.loaded.get(this.dev.id);
+    if (old) this.unload(old);
+    const first = !this.dev;
+    this.devVersion++;
+    this.dev = {
+      id: `dev/local/${m.id}`, repo: "dev/local", sha: "dev", manifest: m, files: dir, author: "you (dev)", likes: 0, stars: 0,
+      topic: m.topic ?? `${m.kind}:${m.id}`, updated: new Date().toISOString(),
+    };
+    this.rechoose();
+    if (first) this.goTo(this.dev);
   }
 
   private rechoose() {
@@ -211,7 +240,7 @@ export class Places {
         this.lastQuery = now;
         this.lastBox = key;
         this.getJson<{ places: PlaceRecord[] }>(`/places?bbox=${key}&limit=200`).then((r) => {
-          for (const p of r.places) this.records.set(p.id, p);
+          for (const p of r.places) this.keep(p);
           this.rechoose();
         }).catch(() => {
           // no registry here (a static server, the dev page): stop asking

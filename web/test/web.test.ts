@@ -191,3 +191,42 @@ describe("flights", () => {
     expect(screenSeconds(8_300_000)).toBeGreaterThan(screenSeconds(500_000));
   });
 });
+
+import { nearPlace, serviceUrl, Throttle } from "../src/host.ts";
+
+describe("embedding (SPEC § 6.1)", () => {
+  test("host=app and parent=", () => {
+    const a = parseLaunch("?host=app&at=35,135.7,3000");
+    expect(a.host).toBe("app");
+    expect(a.api).toBe("https://earth.threert.dev");
+    const p = parseLaunch("?parent=https://example.org/");
+    expect(p.host).toBe("parent");
+    expect(p.parent).toBe("https://example.org");
+    expect(parseLaunch("?parent=javascript:alert(1)").host).toBeUndefined();
+    expect(parseLaunch("?parent=https://a.org/path").host).toBeUndefined();
+  });
+
+  test("service files through the app's scheme", () => {
+    expect(serviceUrl("https://earth.threert.dev/tiles/v1/g6/terrain/0/0/0.c.ert", true)).toBe("ert://earth.threert.dev/tiles/v1/g6/terrain/0/0/0.c.ert");
+    expect(serviceUrl("https://earth-files.threert.dev/p/a/b/sha/x.glb", true)).toBe("ert://earth-files.threert.dev/p/a/b/sha/x.glb");
+    expect(serviceUrl("https://earth.threert.dev/api/v1/places", false)).toBe("https://earth.threert.dev/api/v1/places");
+    expect(serviceUrl("ert://dev/kyoto/earthrt.json", true)).toBe("ert://dev/kyoto/earthrt.json");
+  });
+
+  test("throttle: at most n a second, only on change", () => {
+    const t = new Throttle(10);
+    expect(t.due("a", 0)).toBe(false); // (the first key is "": "a" changed, but 0 − 0 < 100 ms)
+    expect(t.due("a", 150)).toBe(true);
+    expect(t.due("a", 400)).toBe(false); // unchanged
+    expect(t.due("b", 200)).toBe(false); // changed, but 50 ms after the last
+    expect(t.due("b", 300)).toBe(true);
+  });
+
+  test("near: a city by the height inside its bounds, else the distance from the anchor", () => {
+    expect(nearPlace("city", 300, 1000, 250, 5000, 8000).near).toBe(true);
+    expect(nearPlace("city", 300, 9000, 250, 9000, 8000).near).toBe(false);
+    expect(nearPlace("city", 300, 1000, 400, 1100, 8000).near).toBe(false);
+    expect(nearPlace("site", 400, 300, 200, 360, 42)).toEqual({ near: true, distance: 360 });
+    expect(nearPlace("interior", 80, 100, 50, 112, 8).near).toBe(false);
+  });
+});

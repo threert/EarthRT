@@ -8,6 +8,7 @@ import { transferablesOf, type PackedTile } from "./gpu-format.ts";
 export type WorkerRequest =
   | { op: "get"; id: number; url: string; layer: "terrain" | "buildings"; cache: string | null; priority: "high" | "low" | "auto" }
   | { op: "unpack"; id: number; bytes: ArrayBuffer }
+  | { op: "decode"; id: number; bytes: ArrayBuffer; layer: "terrain" | "buildings"; url: string; netMs: number; status: number }
   | { op: "abort"; id: number };
 
 export type WorkerResponse =
@@ -83,6 +84,19 @@ scope.onmessage = async (e: MessageEvent<WorkerRequest>) => {
   if (m.op === "abort") {
     aborts.get(m.id)?.abort();
     aborts.delete(m.id);
+    return;
+  }
+  if (m.op === "decode") {
+    // bytes the main thread fetched (in the app: its URL scheme, which a worker may not reach)
+    try {
+      const key = m.url.match(/\/(terrain|buildings)\/(.+)\.c\.ert$/)?.[2] ?? m.url;
+      const tile: PackedTile = !m.bytes.byteLength
+        ? { kind: "empty", key, netMs: m.netMs, netBytes: 0, cached: false }
+        : { ...(m.layer === "terrain" ? packTerrain(m.bytes) : packBuildings(m.bytes)), netMs: m.netMs, netBytes: m.bytes.byteLength, cached: false };
+      scope.postMessage({ id: m.id, ok: true, tile } satisfies WorkerResponse, transferablesOf(tile));
+    } catch (err) {
+      scope.postMessage({ id: m.id, ok: false, error: String(err) } satisfies WorkerResponse);
+    }
     return;
   }
   if (m.op === "unpack") {

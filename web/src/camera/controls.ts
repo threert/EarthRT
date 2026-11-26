@@ -16,6 +16,8 @@ export interface ControlsHost {
   floor(lat: number, lon: number): number;
   /** Something moved (render again). */
   changed(): void;
+  /** A click without a drag (CSS px). */
+  click?(x: number, y: number): void;
 }
 
 type Drag =
@@ -79,8 +81,11 @@ export class Controls {
     this.fly = null;
   }
 
+  private down: { x: number; y: number; t: number; moved: number } | null = null;
+
   private onDown = (e: PointerEvent) => {
     if (!this.enabled) return;
+    this.down = this.pointers.size === 0 ? { x: e.offsetX, y: e.offsetY, t: performance.now(), moved: 0 } : null;
     this.el.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
     this.stopMotion();
@@ -111,6 +116,7 @@ export class Controls {
 
   private onMove = (e: PointerEvent) => {
     if (!this.pointers.has(e.pointerId)) return;
+    if (this.down) this.down.moved = Math.max(this.down.moved, Math.hypot(e.offsetX - this.down.x, e.offsetY - this.down.y));
     this.pointers.set(e.pointerId, { x: e.offsetX, y: e.offsetY });
     if (this.pinch && this.pointers.size === 2) return this.movePinch();
     const d = this.drag;
@@ -190,6 +196,9 @@ export class Controls {
 
   private onUp = (e: PointerEvent) => {
     this.pointers.delete(e.pointerId);
+    const d0 = this.down;
+    this.down = null;
+    if (d0 && this.pointers.size === 0 && d0.moved < 5 && performance.now() - d0.t < 500 && e.button === 0) this.host.click?.(e.offsetX, e.offsetY);
     if (this.pointers.size < 2) this.pinch = null;
     if (this.pointers.size === 1) {
       // one finger left: continue as a grab from there
@@ -250,6 +259,13 @@ export class Controls {
     const tilt = Math.min(60 * DEG, Math.max(0, Math.PI / 2 + b.pitch));
     this.flyTo(lookAt(g.lat, g.lon, g.h, range, b.heading, tilt));
   };
+
+  /** Puts the camera there at once (the host resuming the map after the traced view). */
+  jump(to: CamState) {
+    this.inertia = null;
+    this.fly = null;
+    this.state = to;
+  }
 
   flyTo(to: CamState, done?: () => void, duration?: number) {
     const p = flyPath(this.state, to);

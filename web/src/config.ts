@@ -24,7 +24,13 @@ export interface Launch {
   sse?: number;
   /** A flight fetches ahead of the camera (default; `lookahead=0` turns it off, for the probe's comparison). */
   lookahead: boolean;
+  /** Embedded (SPEC § 6.1): `host=app` (the native app's WebView) or `parent=<origin>` (an <iframe>). */
+  host?: "app" | "parent";
+  parent?: string;
 }
+
+/** The service when the page is not on its origin (in the app, or another site's frame). */
+export const DEFAULT_SERVICE = "https://earth.threert.dev";
 
 const num = (s: string | undefined) => (s === undefined || s.trim() === "" ? NaN : Number(s));
 
@@ -62,6 +68,14 @@ export function parseLaunch(search: string): Launch {
   if (Number.isFinite(fs) && fs > 0) out.flightSeconds = fs;
   const dpr = num(q.get("dpr") ?? undefined);
   if (Number.isFinite(dpr) && dpr > 0 && dpr <= 4) out.dpr = dpr;
+  if (q.get("host") === "app") out.host = "app";
+  const parent = q.get("parent");
+  if (!out.host && parent && /^https?:\/\/[^/]+$/.test(parent.replace(/\/+$/, ""))) {
+    out.host = "parent";
+    out.parent = parent.replace(/\/+$/, "");
+  }
+  // embedded in the app, the page is not on the service's origin: the service is named
+  if (out.host === "app" && !out.api) out.api = DEFAULT_SERVICE;
   const sse = num(q.get("sse") ?? undefined);
   if (Number.isFinite(sse) && sse >= 0.5 && sse <= 32) out.sse = sse;
   return out;

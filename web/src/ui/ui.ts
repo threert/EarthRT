@@ -166,6 +166,7 @@ export class Ui {
   }
 
   toast(msg: string) {
+    if (this.app.embed) return void console.info(msg);
     const t = $("toast");
     t.textContent = msg;
     t.hidden = false;
@@ -176,6 +177,8 @@ export class Ui {
   // ------------------------------------------------------------------------------------------------- place panel
 
   showPlace(p: PlaceRecord) {
+    // embedded: the host shows the place (earth.selected)
+    if (this.app.embed) return void this.app.embed.select(p);
     this.panelPlace = p;
     const m = p.manifest;
     const panel = $("panel");

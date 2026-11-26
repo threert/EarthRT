@@ -280,12 +280,13 @@ host (`host=app` or `parent=`), the map draws no interface of its own (search, p
 
 | `t` | direction | fields | when |
 | --- | --- | --- | --- |
+| `earth.ready` | map → host | `v` (1) | the map runs and `window.earthrt.receive` exists: the host sends its choices, settings and time now |
 | `earth.view` | map → host | `lat`, `lon`, `alt`, `heading`, `pitch`, `fov`, `ground` (terrain height under the camera), `utc` (ms) | when it changed, at most 10 a second |
 | `earth.places` | map → host | `list: [{ id, title, kind, topic, anchor, chosen, loaded, distance }]` | the places in range changed |
-| `earth.selected` | map → host | `id` or null, `versions: [{ id, title, author, likes, stars, era?, chosen }]` | the user picked a place (or none) |
+| `earth.selected` | map → host | `id` or null, `versions: [{ id, title, author, likes, stars, topic, era?, chosen }]` (the topic's versions and eras) | the user picked a place (or none) |
 | `earth.pick` | map → host | `lat`, `lon`, `h`, `place?`, `building?` | a click on the globe (for "Create here") |
 | `earth.near` | map → host | `id`, `distance` | the camera came within a place's `enterFrom` (§ 5): the host may offer or start the traced view |
-| `earth.flight` | map → host | `state` (`"idle"` \| `"flying"` \| `"done"`), `t`, `duration`, `from`, `to` | a flight started, moved (1 a second) or ended |
+| `earth.flight` | map → host | `state` (`"flying"` \| `"done"`), `time` (s of flight time; `t` is the message's type), `duration`, `progress` (0..1), `from`, `to` (`{ lat, lon, alt, name }`) | a flight started, moved (1 a second) or ended |
 | `earth.status` | map → host | `tiles: { shown, inFlight, queued }`, `bytes`, `gpuMB`, `frameMs`, `errors?` | once a second |
 | `earth.goto` | host → map | `lat`, `lon`, `alt`, `heading?`, `pitch?`, `fov?`, `seconds?` | fly the camera there (0 s: jump; also how the map resumes after the traced view) |
 | `earth.gotoPlace` | host → map | `id` | go to a place's `start` and load it |

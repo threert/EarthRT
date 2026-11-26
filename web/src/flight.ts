@@ -5,6 +5,8 @@ import { findDestination, parseLatLon, type LatLon } from "./config.ts";
 import { basis, DEG, fromVectors, geodetic, lookAt, rotate, type CamState } from "./camera/math.ts";
 import type { App } from "./main.ts";
 
+export type End = LatLon & { alt?: number; name?: string };
+
 /** Seconds on screen for a flight of `d` metres: short hops quick, long ones about a minute and a half. */
 export function screenSeconds(d: number): number {
   return Math.min(110, Math.max(20, 20 + Math.log10(1 + d / 10_000) * 30));
@@ -40,19 +42,21 @@ export class FlightRunner {
     return null;
   }
 
-  async startFrom(from: string, to: string) {
-    const [a, b] = await Promise.all([this.resolve(from), this.resolve(to)]);
+  /** A flight between two ends: names, `lat,lon`, place ids, or points (the host's `earth.fly`). */
+  async startFrom(from: string | End, to: string | End, opt: { cruise?: number; speed?: number } = {}) {
+    const res = (e: string | End) => (typeof e === "string" ? this.resolve(e) : Promise.resolve({ ...e, name: e.name ?? `${e.lat.toFixed(3)}, ${e.lon.toFixed(3)}` }));
+    const [a, b] = await Promise.all([res(from), res(to)]);
     if (!a || !b) {
-      this.app.ui?.toast(`Can't find ${!a ? from : to}`);
+      this.app.ui?.toast(`Can't find ${!a ? String(from) : String(to)}`);
       return;
     }
-    this.start(a, b);
+    this.start(a, b, opt);
   }
 
-  start(a: LatLon & { name?: string }, b: LatLon & { name?: string }) {
+  start(a: End, b: End, opt: { cruise?: number; speed?: number } = {}) {
     const ga = this.app.tiles.groundAt(a.lat, a.lon), gb = this.app.tiles.groundAt(b.lat, b.lon);
-    const alt0 = (Number.isFinite(ga) ? ga : 0) + 1500, alt1 = (Number.isFinite(gb) ? gb : 0) + 1500;
-    this.flight = new Flight({ from: { lat: a.lat, lon: a.lon, alt: alt0 }, to: { lat: b.lat, lon: b.lon, alt: alt1 } });
+    const alt0 = a.alt ?? (Number.isFinite(ga) ? ga : 0) + 1500, alt1 = b.alt ?? (Number.isFinite(gb) ? gb : 0) + 1500;
+    this.flight = new Flight({ from: { lat: a.lat, lon: a.lon, alt: alt0 }, to: { lat: b.lat, lon: b.lon, alt: alt1 }, cruise: opt.cruise, speed: opt.speed });
     this.t = 0;
     this.paused = false;
     this.from = a.name ?? `${a.lat.toFixed(3)}, ${a.lon.toFixed(3)}`;

@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>EarthRT embedded (SPEC § 6.1 test page)</title>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style>
+<!-- Frames the map with parent=<this origin>, keeps what it says in window.got, and lets a test send it messages
+     with window.send({ t: "earth.goto", … }). -->
+<iframe id="map"></iframe>
+<script>
+  const q = new URLSearchParams(location.search);
+  const map = document.getElementById("map");
+  map.src = `/?parent=${encodeURIComponent(location.origin)}&${q.get("q") || ""}`;
+  window.got = [];
+  window.addEventListener("message", (e) => {
+    if (e.source !== map.contentWindow || !e.data?.earthrt) return;
+    window.got.push({ at: performance.now(), ...e.data.earthrt });
+  });
+  window.send = (msg) => map.contentWindow.postMessage({ earthrt: msg }, location.origin);
+  window.kinds = () => { const c = {}; for (const m of window.got) c[m.t] = (c[m.t] || 0) + 1; return c; };
+</script>

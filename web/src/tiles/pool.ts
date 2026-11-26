@@ -39,8 +39,13 @@ export class TilePool {
     else p.fail(Object.assign(new Error(r.error), { status: r.status }));
   }
 
+  /** Fetch on the main thread and hand the bytes to a worker (the app: its `ert://` scheme answers the page; a
+   *  worker's fetch may not reach a custom scheme). */
+  fetchInMain = false;
+
   /** A tile by URL; `signal.onabort` is set so the scheduler's drop reaches the worker's fetch. */
   get(url: string, layer: "terrain" | "buildings", cache: string | null, priority: "high" | "low" | "auto", signal?: { aborted: boolean; onabort?: () => void }): Promise<PackedTile> {
+    if (this.fetchInMain && !url.startsWith("dev:")) return this.getInMain(url, layer, priority, signal);
     const id = this.nextId++, w = this.pick();
     this.busy[w]++;
     return new Promise<PackedTile>((ok, fail) => {
@@ -53,6 +58,27 @@ export class TilePool {
         fail(new Error("aborted"));
       };
       this.workers[w].postMessage({ op: "get", id, url, layer, cache, priority } satisfies WorkerRequest);
+    });
+  }
+
+  private async getInMain(url: string, layer: "terrain" | "buildings", priority: "high" | "low" | "auto", signal?: { aborted: boolean; onabort?: () => void }): Promise<PackedTile> {
+    const ac = new AbortController();
+    if (signal) signal.onabort = () => ac.abort();
+    const t0 = performance.now();
+    let res: Response;
+    try {
+      res = await fetch(url, { signal: ac.signal, priority });
+    } catch (e) {
+      throw ac.signal.aborted ? new Error("aborted") : e;
+    }
+    if (res.status !== 204 && !res.ok) throw Object.assign(new Error(`HTTP ${res.status} ${url}`), { status: res.status });
+    const bytes = res.status === 204 ? new ArrayBuffer(0) : await res.arrayBuffer();
+    if (ac.signal.aborted) throw new Error("aborted");
+    const id = this.nextId++, w = this.pick();
+    this.busy[w]++;
+    return new Promise<PackedTile>((ok, fail) => {
+      this.pending.set(id, { ok, fail, worker: w });
+      this.workers[w].postMessage({ op: "decode", id, bytes, layer, url, netMs: performance.now() - t0, status: res.status } satisfies WorkerRequest, [bytes]);
     });
   }
 

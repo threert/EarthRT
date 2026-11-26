@@ -42,8 +42,8 @@ export class Globe implements Renderer<TileObject> {
   exposure = 10;
   baseExposure = 6;
 
-  constructor(readonly canvas: HTMLCanvasElement, readonly samples = 4) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, depth: true, logarithmicDepthBuffer: true, powerPreference: "high-performance", stencil: false });
+  constructor(readonly canvas: HTMLCanvasElement, readonly samples = 4, preserveDrawingBuffer = false) {
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, depth: true, logarithmicDepthBuffer: true, powerPreference: "high-performance", stencil: false, preserveDrawingBuffer });
     this.renderer.autoClear = false;
     this.renderer.setClearColor(0x000000, 0);
     this.terrainMat = terrainMaterial(this.atmo, this.noise, this.time);
