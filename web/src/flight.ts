@@ -102,7 +102,7 @@ export class FlightRunner {
 
   /** Views the flight will have over the next ~12 s on screen, every ~2 s. */
   lookaheadViews(): View[] | undefined {
-    if (!this.flight || this.paused) return undefined;
+    if (!this.flight || this.paused || !this.app.launch.lookahead) return undefined;
     const out: View[] = [];
     const { w, h } = this.app.size;
     const horizon = 12 * this.timeScale, step = 2 * this.timeScale;

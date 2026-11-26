@@ -40,7 +40,7 @@ export class Globe implements Renderer<TileObject> {
   /** Camera in ECEF (doubles). */
   camPos: V3 = [0, 0, 0];
   exposure = 10;
-  baseExposure = 10;
+  baseExposure = 6;
 
   constructor(readonly canvas: HTMLCanvasElement, readonly samples = 4) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, depth: true, logarithmicDepthBuffer: true, powerPreference: "high-performance", stencil: false });
@@ -190,7 +190,9 @@ export class Globe implements Renderer<TileObject> {
     // exposure: the day's at noon, opened up at night (eyes adapt) unless the camera is out in space
     const alt = Math.hypot(...this.camPos) - 6371000;
     const night = (1 - Math.max(0, Math.min(1, (mu + 0.12) * 6))) * (1 - Math.max(0, Math.min(1, (alt - 50_000) / 400_000)));
-    this.exposure = this.baseExposure * Math.pow(30, night);
+    // (from orbit a photographer opens up a little: the day side under its veil of air)
+    const orbitLift = 1 + 0.4 * Math.max(0, Math.min(1, (alt - 200_000) / 2_000_000));
+    this.exposure = this.baseExposure * orbitLift * Math.pow(30, night);
   }
 
   render(terrain: Entry<TileObject>[], buildings: Entry<TileObject>[], seconds: number) {

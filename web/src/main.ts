@@ -74,6 +74,8 @@ export class App {
     this.tiles = new TileManager(this.source, this.pool, this.globe, gpuBudgetFor(deviceMemory, this.mobile), 12);
     this.tiles.onStale = () => this.refreshSource();
     this.initTime();
+    const ex = Number(new URLSearchParams(location.search).get("exposure"));
+    if (ex > 0) this.globe.baseExposure = ex;
     this.controls = new Controls(this.canvas, {
       ray: (x, y) => this.globe.ray(x, y, basis(this.controls.state), this.width, this.height),
       ground: (lat, lon) => this.tiles.groundAt(lat, lon),

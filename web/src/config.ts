@@ -22,13 +22,15 @@ export interface Launch {
   dpr?: number;
   /** Screen-space error threshold, px (SPEC § 2: web 2.5; settings may scale it). */
   sse?: number;
+  /** A flight fetches ahead of the camera (default; `lookahead=0` turns it off, for the probe's comparison). */
+  lookahead: boolean;
 }
 
 const num = (s: string | undefined) => (s === undefined || s.trim() === "" ? NaN : Number(s));
 
 export function parseLaunch(search: string): Launch {
   const q = new URLSearchParams(search);
-  const out: Launch = { api: "", debug: q.has("debug"), devTiles: q.get("tiles") === "dev" };
+  const out: Launch = { api: "", debug: q.has("debug"), devTiles: q.get("tiles") === "dev", lookahead: q.get("lookahead") !== "0" };
   const at = q.get("at");
   if (at) {
     const [lat, lon, alt, heading, pitch] = at.split(",").map((s) => num(s));
