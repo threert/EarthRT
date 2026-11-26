@@ -168,8 +168,8 @@ with GLB landmarks where a generator falls short.
 
 ### 7. Loading, for the web first
 
-- First picture: the page's HTML, a small script and **one request for the globe's top three levels** (z0–z2
-  packed, ~200 KB), before three.js's own code has finished loading the rest.
+- First picture: the page's HTML, a small script and **one request for the globe's top two levels and the caps** (z0–z1
+  packed, ~110 KB with brotli; z2's 16 tiles follow, ~14 KB each), before three.js's own code has finished loading the rest.
 - Tiles by need: the core's selector ranks tiles by screen-space error and distance from the view's centre; the
   scheduler keeps a fixed number of requests in flight (HTTP/2), drops requests the view no longer wants
   (`AbortController`), retries with backoff, and adds what arrived under a per-frame budget.
