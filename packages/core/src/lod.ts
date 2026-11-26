@@ -58,34 +58,40 @@ export function selectTiles(view: View, opt: SelectOptions): Selection {
   const k2 = view.height / (2 * Math.tan(view.fov / 2));
   const cam = cameraLatLonH(view.position);
 
-  const measure = (k: TileKey) => {
-    const b = tileBounds(k);
-    const inf = opt.info(keyOf(k));
+  // (each tile measured and culled once a call: a parent asks about its children, then visits them)
+  const memo = new Map<string, { d: number; vis: boolean }>();
+  const probe = (k: TileKey, key = keyOf(k)) => {
+    const hit = memo.get(key);
+    if (hit) return hit;
+    const inf = opt.info(key);
     const lo = inf?.minH ?? -500, hi = inf?.maxH ?? 9000;
+    const b = boundsOf(key, k);
     // closest point: the camera's latitude and longitude clamped into the tile, its height into the tile's range
     const lat = Math.min(b.north, Math.max(b.south, cam.lat));
     let lon = cam.lon;
     if (!isCap(k)) lon = clampLon(cam.lon, b.west, b.east);
     const h = Math.min(hi, Math.max(lo, cam.h));
-    const p = geodeticToEcef(lat, lon, h);
-    const d = Math.max(1, Math.hypot(view.position[0] - p[0], view.position[1] - p[1], view.position[2] - p[2]));
-    return { d, b, lo, hi };
-  };
-
-  const visible = (k: TileKey, b: ReturnType<typeof tileBounds>, lo: number, hi: number) => {
-    if (!isCap(k) && k.z < 2) return true;
-    const s = boundingSphere(b, lo, hi);
-    // horizon: every point of the sphere is past the plane where the Earth hides what is behind it
-    if (dot(s.c, camDir) + s.r < horizonDot && camDist > R_HORIZON) return false;
-    for (const pl of planes) if (dot(pl.n, s.c) - pl.d < -s.r) return false;
-    return true;
+    const p = geodeticToEcef(lat, lon, h, scratch);
+    const dx = view.position[0] - p[0], dy = view.position[1] - p[1], dz = view.position[2] - p[2];
+    // (sqrt, not hypot: several times faster in an interpreter)
+    const d = Math.max(1, Math.sqrt(dx * dx + dy * dy + dz * dz));
+    let vis = true;
+    if (isCap(k) || k.z >= 2) {
+      const sph = sphereOf(key, b, lo, hi);
+      // horizon: every point of the sphere is past the plane where the Earth hides what is behind it
+      if (dot(sph.c, camDir) + sph.r < horizonDot && camDist > R_HORIZON) vis = false;
+      else for (const pl of planes) if (dot(pl.n, sph.c) - pl.d < -sph.r) { vis = false; break; }
+    }
+    const r = { d, vis };
+    memo.set(key, r);
+    return r;
   };
 
   const visit = (k: TileKey) => {
     const key = keyOf(k);
     sel.touched.add(key);
-    const m = measure(k);
-    if (!visible(k, m.b, m.lo, m.hi)) return;
+    const m = probe(k, key);
+    if (!m.vis) return;
     const sse = (tileError(k) * k2) / m.d;
     const inf = opt.info(key);
     if (!inf?.ready) {
@@ -98,10 +104,7 @@ export function selectTiles(view: View, opt: SelectOptions): Selection {
       sel.sse.set(key, sse);
       return;
     }
-    const kids = children(k as { z: number; x: number; y: number }).filter((c) => {
-      const mc = measure(c);
-      return visible(c, mc.b, mc.lo, mc.hi);
-    });
+    const kids = children(k as { z: number; x: number; y: number }).filter((c) => probe(c).vis);
     if (kids.every((c) => opt.info(keyOf(c))?.ready)) {
       for (const c of kids) visit(c);
       return;
@@ -111,7 +114,7 @@ export function selectTiles(view: View, opt: SelectOptions): Selection {
     for (const c of kids) {
       const ck = keyOf(c);
       sel.touched.add(ck);
-      if (!opt.info(ck)?.ready) sel.want.push({ key: c, priority: (tileError(c) * k2) / measure(c).d });
+      if (!opt.info(ck)?.ready) sel.want.push({ key: c, priority: (tileError(c) * k2) / probe(c, ck).d });
     }
   };
 
@@ -120,6 +123,29 @@ export function selectTiles(view: View, opt: SelectOptions): Selection {
   visit({ cap: "s" });
   sel.want.sort((a, b) => b.priority - a.priority);
   return sel;
+}
+
+// Tiles' bounds and bounding spheres, kept across calls (they depend on the key and the heights only): most of a
+// selection's time was making them again, 18 geodetic conversions a sphere.
+const scratch: V3 = [0, 0, 0];
+const boundsCache = new Map<string, ReturnType<typeof tileBounds>>();
+const sphereCache = new Map<string, { lo: number; hi: number; c: V3; r: number }>();
+function boundsOf(key: string, k: TileKey) {
+  let b = boundsCache.get(key);
+  if (!b) {
+    if (boundsCache.size > 6_000) boundsCache.clear();
+    b = tileBounds(k);
+    boundsCache.set(key, b);
+  }
+  return b;
+}
+function sphereOf(key: string, b: ReturnType<typeof tileBounds>, lo: number, hi: number) {
+  const s = sphereCache.get(key);
+  if (s && s.lo === lo && s.hi === hi) return s;
+  if (sphereCache.size > 6_000) sphereCache.clear();
+  const n = { lo, hi, ...boundingSphere(b, lo, hi) };
+  sphereCache.set(key, n);
+  return n;
 }
 
 function clampLon(lon: number, w: number, e: number) {

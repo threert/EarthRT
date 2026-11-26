@@ -10,3 +10,4 @@ native/.build/
 native/core/target/
 native/macos/*.xcodeproj
 xcuserdata/
+traced/dist/
