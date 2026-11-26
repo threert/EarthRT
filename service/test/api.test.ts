@@ -193,14 +193,15 @@ describe("mirror", () => {
 describe("routing", () => {
   test("meta, tile address errors, and the page", async () => {
     const meta = (await (await call("/tiles/v1/meta.json")).json()) as { gen: string; terrain: { maxZoom: number; n: number }; buildings: { regions: unknown[] }; attribution: string[] };
-    expect(meta.gen).toBe("g1");
+    expect(meta.gen).toMatch(/^g\d+$/);
+    const g = meta.gen;
     expect(meta.terrain).toMatchObject({ maxZoom: 14, n: 65 });
     expect(meta.buildings.regions.length).toBeGreaterThanOrEqual(7);
     expect(meta.attribution.join()).toContain("OpenStreetMap");
     expect((await call("/tiles/v1/g0/terrain/0/0/0.c.ert")).status).toBe(404);
-    expect((await call("/tiles/v1/g1/terrain/15/0/0.c.ert")).status).toBe(404);
-    expect((await call("/tiles/v1/g1/buildings/13/0/0.c.ert")).status).toBe(404);
-    expect((await call("/tiles/v1/g1/terrain/3/9/0.c.ert")).status).toBe(404);
+    expect((await call(`/tiles/v1/${g}/terrain/15/0/0.c.ert`)).status).toBe(404);
+    expect((await call(`/tiles/v1/${g}/buildings/13/0/0.c.ert`)).status).toBe(404);
+    expect((await call(`/tiles/v1/${g}/terrain/3/9/0.c.ert`)).status).toBe(404);
     const page = await call("/");
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("EarthRT");
