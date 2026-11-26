@@ -132,7 +132,10 @@ void main() {
     float dist = w * vlen * 0.001 * vs;
     int steps = dist < 2.0 ? 6 : 14;
     integrate(p, v, dist, uSun, steps, jitter, L, T);
-    col = c.rgb * T + L * uSunE;
+    vec3 surf = c.rgb;
+    // (a NaN from a surface's shading would print black: drop it, the air's light stays)
+    if (any(isnan(surf)) || any(isinf(surf))) surf = vec3(0.0);
+    col = surf * T + L * uSunE;
   } else {
     vec2 g = sphere(p, v, Rb);
     bool ground = g.x > 0.0;

@@ -19,6 +19,8 @@ const base = arg("--base", "http://127.0.0.1:8795")!;
 const runs = Number(arg("--runs", "3"));
 const flightSeconds = Number(arg("--flight-seconds", "120"));
 const startQuery = arg("--query", "")!; // the bare page: what anyone opening the address sees
+// tiles straight from a service (HTTP/2 to its edge, as in production) rather than through the dev server's proxy
+const api = arg("--api") ? `&api=${arg("--api")}` : "";
 
 const pct = (a: number[], p: number) => {
   const s = [...a].sort((x, y) => x - y);
@@ -31,7 +33,7 @@ interface FirstView { firstGlobeMs: number; settledMs: number; bytes: number; ti
 async function firstView(query: string): Promise<FirstView> {
   const b = await launch();
   try {
-    const page = await b.open(`${base}/?${query}`);
+    const page = await b.open(`${base}/?${query}${api}`);
     await page.waitFor("window.earth && earth.firstGlobeMs > 0", 30_000);
     const first = await page.evaluate<number>("performance.getEntriesByName('earthrt-first-globe')[0].startTime");
     await settle(page, 120_000, 1500);
@@ -54,7 +56,7 @@ async function flight(lookahead: boolean): Promise<FlightResult> {
   const b = await launch();
   try {
     const q = `fly=kyoto;san-francisco&flightSeconds=${flightSeconds}&time=2026-06-21T01:00:00Z${lookahead ? "" : "&lookahead=0"}`;
-    const page = await b.open(`${base}/?${q}`);
+    const page = await b.open(`${base}/?${q}${api}`);
     await page.waitFor("window.earth && earth.flight && earth.flight.active && earth.firstGlobeMs > 0", 60_000);
     await page.evaluate("earth.record = []");
     await page.waitFor("!earth.flight.active", (flightSeconds + 60) * 1000);

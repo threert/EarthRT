@@ -24,8 +24,12 @@ vec3 bumped(vec3 N, vec3 pos, float h) {
   float dhx = dFdx(h), dhy = dFdy(h);
   vec3 r1 = cross(dpy, N), r2 = cross(N, dpx);
   float det = dot(dpx, r1);
+  // (at grazing angles the screen's derivatives turn parallel: no bump there, rather than a NaN)
+  if (abs(det) < 1e-20) return N;
   vec3 g = sign(det) * (dhx * r1 + dhy * r2);
-  return normalize(abs(det) * N - g);
+  vec3 b = abs(det) * N - g;
+  float l = length(b);
+  return l > 0.0 ? b / l : N;
 }
 
 struct Light { vec3 sun; vec3 sky; vec3 up; float r; float muS; };

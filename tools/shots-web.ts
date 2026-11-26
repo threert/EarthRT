@@ -12,7 +12,7 @@ const arg = (k: string) => {
 };
 const base = arg("--base") ?? "http://127.0.0.1:8795";
 const outDir = resolve(root, arg("--out") ?? "out/s3");
-const extra = arg("--query") ?? "";
+const extra = (arg("--query") ?? "") + (arg("--api") ? `&api=${arg("--api")}` : "");
 
 export interface Pose { name: string; query: string; /** extra settling after the tiles are in, ms */ settle?: number; flight?: { progress: number } }
 
