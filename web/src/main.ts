@@ -21,7 +21,9 @@ declare global {
   }
 }
 
-const SSE_THRESHOLD = 2.5;
+// SPEC § 2: the web refines while a tile's error is over 6 px (8 on phones): at 2.5 a 3 km oblique view wants ~1,000
+// tiles, at 6 about 290, and by eye they look the same (out/dev/r2).
+const SSE_THRESHOLD = 6;
 
 export class App {
   readonly launch: Launch;
@@ -49,6 +51,8 @@ export class App {
   record: { t: number; hole: boolean; coarse: number; shown: number; gpu: number; inFlight: number; alt: number }[] | null = null;
   mobile = matchMedia("(pointer: coarse)").matches;
   dpr = 1;
+  /** 6 px on desktops, 8 on phones (slower networks, smaller GPUs), unless the page says otherwise. */
+  get sse() { return this.launch.sse ?? (this.mobile ? 8 : SSE_THRESHOLD); }
   private width = 1;
   private height = 1;
 
@@ -68,6 +72,7 @@ export class App {
     this.source = await this.findSource(boot);
     const deviceMemory = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
     this.tiles = new TileManager(this.source, this.pool, this.globe, gpuBudgetFor(deviceMemory, this.mobile), 12);
+    this.tiles.onStale = () => this.refreshSource();
     this.initTime();
     this.controls = new Controls(this.canvas, {
       ray: (x, y) => this.globe.ray(x, y, basis(this.controls.state), this.width, this.height),
@@ -106,12 +111,30 @@ export class App {
         meta = api && api !== boot?.api ? await fetch(`${api}/tiles/v1/meta.json`).then((r) => (r.ok ? r.json() : null)) : await (boot?.meta ?? null);
       } catch { meta = null; }
     }
-    if (meta && meta.gen && meta.terrain) {
-      const base = `${api}/tiles/v1/${meta.gen}`;
-      return { meta, dev: false, cache: `earthrt-tiles-${meta.gen}`, url: (layer, key) => `${base}/${layer}/${key}.c.ert` };
-    }
+    if (meta && meta.gen && meta.terrain) return this.serviceSource(meta, api);
     console.info("EarthRT: no tile service answered; using the dev tile source (AWS Terrain Tiles made into compact tiles here)");
     return { meta: DEV_META as TileMeta, dev: true, cache: null, url: (_layer, key) => `dev:terrain/${key}` };
+  }
+
+  private staleAt = 0;
+  /** The service's generation moved on (a 404): read meta.json again and ask for the new generation's tiles from now
+   *  on. What is loaded stays until the view replaces it. */
+  private async refreshSource() {
+    if (this.source.dev || performance.now() - this.staleAt < 10_000) return;
+    this.staleAt = performance.now();
+    const api = this.launch.api || "";
+    const meta = await fetch(`${api}/tiles/v1/meta.json`, { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null) as TileMeta | null;
+    if (!meta?.gen || meta.gen === this.source.meta.gen) return;
+    console.info(`EarthRT: tiles moved from ${this.source.meta.gen} to ${meta.gen}`);
+    this.source = this.serviceSource(meta, api);
+    this.tiles.source = this.source;
+    this.hud.attribution(meta.attribution);
+    this.dropOldCaches();
+  }
+
+  private serviceSource(meta: TileMeta, api: string): TileSource {
+    const base = `${api}/tiles/v1/${meta.gen}`;
+    return { meta, dev: false, cache: `earthrt-tiles-${meta.gen}`, url: (layer, key) => `${base}/${layer}/${key}.c.ert` };
   }
 
   private async dropOldCaches() {
@@ -194,7 +217,7 @@ export class App {
     const b = basis(s);
     this.globe.setCamera(s.pos, b, this.fov);
     const lookahead = this.flight.lookaheadViews();
-    const f = this.tiles.update(this.view(s), { threshold: SSE_THRESHOLD, lookahead });
+    const f = this.tiles.update(this.view(s), { threshold: this.sse, lookahead });
     this.places.update(s);
     this.globe.setSun(sunDirection(this.time));
     this.globe.buildingsMat.uniforms.uHoleCount.value = this.places.holes(this.globe.buildingsMat.uniforms.uHoles.value);

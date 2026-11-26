@@ -114,12 +114,8 @@ vec3 land(vec3 N, float fw, Light l, out vec3 Nout) {
   float field = textureLod(uNoise, (floor(vDetail * (64.0 / PERIOD) + 0.5 * n1.b) + 0.5) / 64.0, 0.0).g;
   vec3 tint = mix(vec3(0.85, 1.05, 0.75), vec3(1.25, 1.1, 0.75), field);
   albedo = mix(albedo, albedo * tint * mix(0.85, 1.15, n8.b), crop * f1);
-  // built-up: blocks and streets
-  vec3 q = vDetail * (64.0 / PERIOD) * 1.0;
-  float block = textureLod(uNoise, (floor(q) + 0.5) / 64.0, 0.0).g;
-  vec3 e = abs(fract(q) - 0.5);
-  float street = smoothstep(0.43, 0.47, max(max(e.x, e.y), e.z));
-  albedo = mix(albedo, albedo * mix(0.75, 1.3, block) * mix(1.0, 0.6, street), urban * f1);
+  // built-up: a patchwork of roofs and yards (smooth noise at ~500 m and ~60 m), no lines: the trunk has no streets
+  albedo = mix(albedo, albedo * mix(0.8, 1.2, n1.b) * mix(1.0, mix(0.82, 1.18, n8.r), f8), urban * f1);
   // rock: ridged streaks; snow: drifts
   m *= mix(1.0, mix(0.7, 1.25, n8.a) * mix(0.85, 1.15, n64.a), bare * f8);
   m *= mix(1.0, mix(0.9, 1.04, n8.r), snow * f8);

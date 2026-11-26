@@ -36,9 +36,9 @@ async function fetchBytes(url: string, cacheName: string | null, signal: AbortSi
     return { status: hit.status, bytes: b, netMs: performance.now() - t0, cached: true };
   }
   const res = await fetch(url, { signal, priority, mode: "cors", credentials: "omit" });
-  if (res.status === 204 || res.status === 404) {
+  if (res.status === 204) {
     // (no data there: remembered too, so it is not asked for again)
-    if (cache && res.status === 204) cache.put(url, new Response(null, { status: 204 })).catch(() => {});
+    if (cache) cache.put(url, new Response(null, { status: 204 })).catch(() => {});
     return { status: res.status, bytes: new ArrayBuffer(0), netMs: performance.now() - t0, cached: false };
   }
   if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status} ${url}`), { status: res.status });

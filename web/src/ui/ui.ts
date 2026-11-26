@@ -1,5 +1,5 @@
 // The page's controls: search (destinations, places, coordinates), place markers and the place panel (versions, eras,
-// likes and stars, Go there, Open in ThreeRT), flights (from → to, progress, free look), the sun's time, a readout.
+// likes and stars, Go there, Open in EarthRT), flights (from → to, progress, free look), the sun's time, a readout.
 // Plain DOM; the markup is in index.html.
 import { geodeticToEcef, placeRadius, solarTime, topicBase, VISIBLE_FROM, type PlaceRecord } from "@earthrt/core";
 import { DESTINATIONS, parseLatLon, type Destination } from "../config.ts";
@@ -25,10 +25,10 @@ export function formatHour(h: number): string {
   return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
 }
 
-/** The deep link that opens the same view in the ThreeRT client (the EarthRT package at this host). */
-export function threertLink(host: string, params: Record<string, string>): string {
+/** The deep link that opens the same view in the EarthRT app (SPEC § 7): the page's own parameters. */
+export function appLink(params: Record<string, string>): string {
   const q = new URLSearchParams(params).toString();
-  return `threerts://${host}/${q ? `?${q}` : ""}`;
+  return `earthrt://open${q ? `?${q}` : ""}`;
 }
 
 export class Ui {
@@ -88,12 +88,17 @@ export class Ui {
       b.onclick = () => this.go({ kind: "dest", d });
       dl.appendChild(b);
     }
-    $("open-threert").onclick = () => {
-      const s = this.app.cameraState(), g = geodetic(s.pos);
-      const params: Record<string, string> = { at: `${g.lat.toFixed(5)},${g.lon.toFixed(5)},${Math.round(g.h)},${((s.heading * 180) / Math.PI).toFixed(1)},${((s.pitch * 180) / Math.PI).toFixed(1)}` };
-      if (this.panelPlace) params.place = this.panelPlace.id;
-      location.href = threertLink(location.host || "earth.threert.dev", params);
-    };
+    $("open-app").onclick = () => (location.href = appLink(this.linkParams()));
+  }
+
+  /** What the page shows now, as launch parameters: the camera, the open place, the flight. */
+  linkParams(): Record<string, string> {
+    const s = this.app.cameraState(), g = geodetic(s.pos);
+    const out: Record<string, string> = { at: `${g.lat.toFixed(5)},${g.lon.toFixed(5)},${Math.round(g.h)},${((s.heading * 180) / Math.PI).toFixed(1)},${((s.pitch * 180) / Math.PI).toFixed(1)}` };
+    if (this.panelPlace && !this.panelPlace.id.startsWith("dev/")) out.place = this.panelPlace.id;
+    const f = this.app.flight.flight;
+    if (f) out.fly = `${f.plan.from.lat.toFixed(5)},${f.plan.from.lon.toFixed(5)};${f.plan.to.lat.toFixed(5)},${f.plan.to.lon.toFixed(5)}`;
+    return out;
   }
 
   // ------------------------------------------------------------------------------------------------------ search
@@ -184,17 +189,17 @@ export class Ui {
       `<span title="likes on EarthRT">♥ ${p.likes}</span>`,
       `<span title="stars on GitHub">★ ${p.stars}</span>`,
     ].join("");
-    const sceneOnly = m.content.every((c) => c.type !== "glb");
+    const sceneOnly = m.content.every((c) => c.type !== "glb" && !(c.type === "scene" && c.fallback));
     const note = $("panel-note");
     note.hidden = !sceneOnly;
-    note.textContent = sceneOnly ? "This place is made of a ThreeRT scene. Open it in ThreeRT to see it — the web shows its marker only." : "";
+    note.textContent = sceneOnly ? "This place is a live scene. Open it in the EarthRT app to see it — the web shows its marker only." : "";
     $("panel-credits").textContent = [m.license, ...(m.credits ?? [])].filter(Boolean).join(" · ");
     $("panel-go").onclick = () => this.app.places.goTo(p);
     $("panel-fly").onclick = () => {
       const g = geodetic(this.app.controls.state.pos);
       this.app.flight.start({ lat: g.lat, lon: g.lon, name: "Here" }, { lat: m.anchor.lat, lon: m.anchor.lon, name: m.title });
     };
-    $("panel-threert").onclick = () => (location.href = threertLink(location.host || "earth.threert.dev", { place: p.id }));
+    $("panel-app").onclick = () => (location.href = appLink(p.id.startsWith("dev/") ? this.linkParams() : { place: p.id }));
     const versions = $("panel-versions");
     versions.innerHTML = `<li class="muted">Looking for other versions…</li>`;
     const eras = $("panel-eras");

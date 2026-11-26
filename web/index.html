@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>EarthRT — the whole Earth</title>
-<meta name="description" content="The whole Earth in your browser, from orbit to the aeroplane window: open data, places anyone makes on GitHub. Path-traced in ThreeRT.">
+<meta name="description" content="The whole Earth in your browser, from orbit to the aeroplane window: open data, places anyone makes on GitHub. Path-traced in the EarthRT app.">
 <meta name="theme-color" content="#05070b">
 <meta property="og:title" content="EarthRT">
 <meta property="og:description" content="The whole Earth, path-traced: a globe from open data, places from GitHub.">
@@ -65,7 +65,7 @@ button { cursor: pointer; }
 #results li:hover { background: rgba(255,255,255,.07); }
 #results li span { color: var(--dim); font-size: 12px; }
 #actions { margin-left: auto; display: flex; gap: 8px; }
-.btn { padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); white-space: nowrap; }
+.btn { text-decoration: none; display: inline-block; padding: 9px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--glass); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); white-space: nowrap; }
 .btn:hover { border-color: rgba(255,255,255,.25); }
 .btn.primary { background: rgba(143, 211, 255, .16); border-color: rgba(143, 211, 255, .35); }
 
@@ -151,7 +151,8 @@ button { cursor: pointer; }
   </div>
   <div id="actions">
     <button id="fly-open" class="btn">Fly</button>
-    <button id="open-threert" class="btn primary">Open in ThreeRT</button>
+    <a id="get-app" class="btn wide" href="/download/">Get the app</a>
+    <button id="open-app" class="btn primary" title="Open this view in the EarthRT app (path-traced)">Open in EarthRT</button>
   </div>
 </div>
 <div id="destinations"></div>
@@ -172,7 +173,7 @@ button { cursor: pointer; }
   <div id="panel-actions">
     <button id="panel-go" class="btn primary">Go there</button>
     <button id="panel-fly" class="btn">Fly there</button>
-    <button id="panel-threert" class="btn">Open in ThreeRT</button>
+    <button id="panel-app" class="btn">Open in EarthRT</button>
   </div>
   <div id="panel-eras" hidden></div>
   <h3>Versions</h3>

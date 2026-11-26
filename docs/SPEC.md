@@ -45,7 +45,7 @@ follows it. Version numbers are in every format, so an old client meets a new se
   are loaded; until then the parent shows.
 - **Screen-space error**: a tile's geometric error is `size / (n − 1) · 1.5`, `size` its width in metres at its centre's
   latitude; it is refined while `error · viewportHeight / (2 · distance · tan(fov / 2))` exceeds the host's
-  threshold (web 2.5 px, app 2 px; settings may scale it).
+  threshold (web 6 px, 8 on phones; app 2 px; settings may scale it).
 - **Buildings**: one tile per z14 terrain tile (`meta.buildings.zoom`), shown while that terrain tile or a child of it
   shows. A building is in the tile of its centroid; in v1 a building that crosses a tile edge is cut at the edge into
   pieces that abut (the source's vector tiles are cut that way).

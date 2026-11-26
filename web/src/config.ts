@@ -20,6 +20,8 @@ export interface Launch {
   flightSeconds?: number;
   /** Device pixel ratio override (tests, screenshots). */
   dpr?: number;
+  /** Screen-space error threshold, px (SPEC § 2: web 2.5; settings may scale it). */
+  sse?: number;
 }
 
 const num = (s: string | undefined) => (s === undefined || s.trim() === "" ? NaN : Number(s));
@@ -58,6 +60,8 @@ export function parseLaunch(search: string): Launch {
   if (Number.isFinite(fs) && fs > 0) out.flightSeconds = fs;
   const dpr = num(q.get("dpr") ?? undefined);
   if (Number.isFinite(dpr) && dpr > 0 && dpr <= 4) out.dpr = dpr;
+  const sse = num(q.get("sse") ?? undefined);
+  if (Number.isFinite(sse) && sse >= 0.5 && sse <= 32) out.sse = sse;
   return out;
 }
 

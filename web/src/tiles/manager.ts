@@ -69,6 +69,7 @@ export interface Stats {
   latencies: number[];
   uploadsLastFrame: number;
   failures: number;
+  lastErrors: string[];
 }
 
 export interface UpdateOptions {
@@ -90,9 +91,11 @@ export class TileManager<O> {
   private lowUrls = new Set<string>();
   gpuBytes = 0;
   gpuBudget: number;
-  readonly stats: Stats = { shown: 0, buildingsShown: 0, inFlight: 0, queued: 0, resident: 0, gpuBytes: 0, netBytes: 0, requests: 0, cacheHits: 0, decodeMs: 0, decoded: 0, latencies: [], uploadsLastFrame: 0, failures: 0 };
+  /** Called when the service answers 404 (its generation moved on: read meta.json again). */
+  onStale: (() => void) | null = null;
+  readonly stats: Stats = { shown: 0, buildingsShown: 0, inFlight: 0, queued: 0, resident: 0, gpuBytes: 0, netBytes: 0, requests: 0, cacheHits: 0, decodeMs: 0, decoded: 0, latencies: [], uploadsLastFrame: 0, failures: 0, lastErrors: [] };
 
-  constructor(readonly source: TileSource, private readonly pool: TilePool, private readonly renderer: Renderer<O>, gpuBudget: number, maxInFlight = 12) {
+  constructor(public source: TileSource, private readonly pool: TilePool, private readonly renderer: Renderer<O>, gpuBudget: number, maxInFlight = 12) {
     this.gpuBudget = gpuBudget;
     this.scheduler = new Scheduler<PackedTile>({
       get: (url, signal) => {
@@ -183,7 +186,11 @@ export class TileManager<O> {
     // arrivals
     for (const r of this.scheduler.take()) {
       if (r.error !== undefined) {
-        if ((r.error as Error).message !== "aborted") this.stats.failures++;
+        if ((r.error as Error).message !== "aborted") {
+          this.stats.failures++;
+          if ((r.error as { status?: number }).status === 404) this.onStale?.();
+          if (this.stats.lastErrors.length < 20) this.stats.lastErrors.push(`${r.id}: ${(r.error as Error).message}`);
+        }
         continue;
       }
       const t = r.result!;
