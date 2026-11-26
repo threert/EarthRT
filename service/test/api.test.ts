@@ -31,6 +31,8 @@ beforeAll(async () => {
       if (p === "/user") return users[tok] ? Response.json(users[tok]) : new Response("{}", { status: 401 });
       if (p === "/repos/alice/sample-cube") return Response.json({ full_name: "alice/sample-cube", private: false, default_branch: "main", stargazers_count: 3, owner: { login: "alice", id: 1 }, permissions: { push: users[tok]?.login === "alice" }, pushed_at: "2026-11-26T00:00:00Z" });
       if (p === "/repos/alice/sample-cube/commits/main") return new Response(head);
+      if (p === "/web/alice/sample-cube/releases/download/v0.1.0/15-1-2.ert") return Response.redirect(`${u.origin}/objects/15-1-2.ert`, 302);
+      if (p === "/objects/15-1-2.ert") return new Response(BIG);
       if (p === "/web/alice/sample-cube.git/info/refs") return new Response(`001e# service=git-upload-pack\n0000015b${head} HEAD\0multi_ack symref=HEAD:refs/heads/main\n003f${head} refs/heads/main\n0000`);
       if (p === "/search/repositories") return Response.json({ total_count: 1, items: [{ full_name: "alice/sample-cube", private: false, default_branch: "main", stargazers_count: 5, owner: { login: "alice", id: 1 }, pushed_at: "2026-11-26T01:00:00Z" }] });
       for (const sha of [SHA, SHA2]) {
@@ -179,6 +181,25 @@ describe("mirror", () => {
     expect(r.status).toBe(200);
     expect(new Uint8Array(await r.arrayBuffer())).toEqual(BIG);
   });
+  test("compressible files go out gzipped when asked", async () => {
+    for (const how of ["gzip", "r2+gzip"]) {
+      const r = await call(`/p/alice/sample-cube/${SHA2}/models/big.glb`, { headers: { "accept-encoding": "gzip" } });
+      expect(r.status).toBe(200);
+      expect(r.headers.get("x-earthrt")).toContain(how);
+      expect(new Uint8Array(await r.arrayBuffer())).toEqual(BIG); // fetch decodes it
+      await Bun.sleep(200);
+    }
+    const plain = await call(`/p/alice/sample-cube/${SHA2}/models/big.glb`, { headers: { "accept-encoding": "identity" } });
+    expect(new Uint8Array(await plain.arrayBuffer())).toEqual(BIG);
+  });
+  test("release assets by @release/<tag>/<asset>", async () => {
+    const r = await call(`/p/alice/sample-cube/${SHA}/@release/v0.1.0/15-1-2.ert`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("application/octet-stream");
+    expect(new Uint8Array(await r.arrayBuffer())).toEqual(BIG);
+    expect((await call(`/p/alice/sample-cube/${SHA}/@release/v0.1.0/nope.ert`)).status).toBe(404);
+    expect((await call(`/p/alice/sample-cube/${SHA}/@release/v0.1.0/a/b.ert`)).status).toBe(400);
+  });
   test("never a page; only registered commits; no escapes", async () => {
     const r = await call(`/p/alice/sample-cube/${SHA}/page.html`);
     expect(r.headers.get("content-type")).toBe("application/octet-stream");
@@ -198,10 +219,15 @@ describe("routing", () => {
     expect(meta.terrain).toMatchObject({ maxZoom: 14, n: 65 });
     expect(meta.buildings.regions.length).toBeGreaterThanOrEqual(7);
     expect(meta.attribution.join()).toContain("OpenStreetMap");
-    expect((await call("/tiles/v1/g0/terrain/0/0/0.c.ert")).status).toBe(404);
+    expect((await call("/tiles/v1/x1/terrain/0/0/0.c.ert")).status).toBe(404);
     expect((await call(`/tiles/v1/${g}/terrain/15/0/0.c.ert`)).status).toBe(404);
     expect((await call(`/tiles/v1/${g}/buildings/13/0/0.c.ert`)).status).toBe(404);
     expect((await call(`/tiles/v1/${g}/terrain/3/9/0.c.ert`)).status).toBe(404);
+    // an older generation: its own tile if made then, else a redirect to the current one
+    const old = await call(`/tiles/v1/g1/terrain/3/1/2.c.ert`, { redirect: "manual" });
+    expect(old.status).toBe(302);
+    expect(old.headers.get("location")).toBe(`/tiles/v1/${g}/terrain/3/1/2.c.ert`);
+    expect((await call(`/tiles/v1/g999/terrain/3/1/2.c.ert`)).status).toBe(404);
     const page = await call("/");
     expect(page.status).toBe(200);
     expect(await page.text()).toContain("EarthRT");

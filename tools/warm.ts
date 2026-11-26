@@ -17,18 +17,23 @@ for (const k of tilesInBox({ west, south, east, north }, 14)) {
   if (args.includes("--x")) urls.push(`buildings/${keyOf(k)}.x.ert`, `terrain/${keyOf(k)}.x.ert`);
 }
 console.log(`${urls.length} tiles (${gen})`);
-const times: number[] = [];
+const times: number[] = [], made: number[] = [], hits: number[] = [];
 let i = 0, fails = 0, done = 0;
 const t0 = performance.now();
 await Promise.all(Array.from({ length: conc }, async () => {
   while (i < urls.length) {
     const u = urls[i++];
-    const t = performance.now();
-    const r = await curl(`${api}/tiles/v1/${gen}/${u}`, undefined, { "accept-encoding": "br" });
-    times.push(performance.now() - t);
-    if (r.status !== 200 && r.status !== 204) { fails++; console.error(u, r.status, new TextDecoder().decode(r.body.subarray(0, 200))); }
+    const p = Bun.spawn(["curl", "-sS", "-o", "/dev/null", "-H", "accept-encoding: br", "--max-time", "60", "-w", "%{http_code} %{time_total} %header{server-timing}|%header{x-earthrt}", `${api}/tiles/v1/${gen}/${u}`], { stdout: "pipe" });
+    const line = (await new Response(p.stdout).text()).trim();
+    const [status, total] = line.split(" ");
+    const server = Number(/total;dur=(\d+)/.exec(line)?.[1] ?? NaN);
+    times.push(Number(total) * 1000);
+    if (!Number.isNaN(server)) (/\|made|\|expanded/.test(line) ? made : hits).push(server);
+    if (status !== "200" && status !== "204") { fails++; console.error(u, line); }
     if (++done % 200 === 0) console.log(`${done}/${urls.length} ${((performance.now() - t0) / 1000).toFixed(0)} s`);
   }
 }));
+const q = (a: number[], f: number) => (a.sort((x, y) => x - y), a.length ? a[Math.min(a.length - 1, Math.floor(a.length * f))].toFixed(0) : "-");
+console.log(`server-side: made ${made.length} p50 ${q(made, 0.5)} p95 ${q(made, 0.95)} max ${q(made, 1)} ms; already there ${hits.length} p50 ${q(hits, 0.5)} p95 ${q(hits, 0.95)} ms`);
 times.sort((a, b) => a - b);
 console.log(`done: ${fails} failed; client-side p50 ${times[times.length >> 1].toFixed(0)} ms, p95 ${times[Math.floor(times.length * 0.95)].toFixed(0)} ms, max ${times[times.length - 1].toFixed(0)} ms`);

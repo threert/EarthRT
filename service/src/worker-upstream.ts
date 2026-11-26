@@ -57,11 +57,11 @@ async function cachedFetch(key: string, make: () => Promise<Response>, ctx?: Exe
 export class WorkerUpstream implements Upstream {
   constructor(private bucket: R2Bucket, private ctx?: ExecutionContext) {}
   get(url: string) {
-    return cachedFetch(url, () => fetch(url, { cf: { cacheTtl: TTL, cacheEverything: true } }), this.ctx);
+    return cachedFetch(url, () => fetch(url, { cf: { cacheTtl: TTL, cacheEverything: true }, signal: AbortSignal.timeout(15_000) }), this.ctx);
   }
   async range(url: string, start: number, length: number) {
     const key = `https://upstream.earthrt.internal/range/${start}/${length}/${encodeURIComponent(url)}`;
-    const body = await cachedFetch(key, () => fetch(url, { headers: { range: `bytes=${start}-${start + length - 1}` } }), this.ctx);
+    const body = await cachedFetch(key, () => fetch(url, { headers: { range: `bytes=${start}-${start + length - 1}` }, signal: AbortSignal.timeout(15_000) }), this.ctx);
     if (body && body.length > length) return body.subarray(start, start + length); // a server that ignored the range
     return body;
   }

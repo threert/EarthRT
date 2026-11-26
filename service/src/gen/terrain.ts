@@ -15,10 +15,14 @@ import { albedo, CLS, seaIce, worldCoverClass } from "./albedo.ts";
 export const TERRARIUM = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium";
 export const TERRARIUM_MAX_Z = 15;
 export const N = 65;
+/** The finest Terrarium zoom with open-sea bathymetry. */
+const BATHY_Z = 10;
 
 /** Land cover at points: ESA WorldCover values (10 … 100), 0 where there is none (the open sea, no data). */
 export interface LandCover {
   sample(lons: Float64Array, lats: Float64Array, degPerPixel: number, only?: Uint8Array): Promise<Uint8Array>;
+  /** share of bare land in the region about each point (0..1), null when unknown */
+  desertShare?(lats: Float64Array, lons: Float64Array): Promise<Float32Array | null>;
   /** source names for the tile's `src` */
   readonly src: string[];
 }
@@ -125,6 +129,37 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       elev[r * W + c] = t[py * 256 + px];
     }
   }
+  // Terrarium has no bathymetry past z10 in the open sea (its tiles are all 0 m there): a pixel at exactly 0 m that
+  // is not land takes the depth of its z10 ancestor (bilinear), so it stays sea and as deep as the parent says
+  const filled: number[] = [];
+  if (z > BATHY_Z) {
+    const f = 2 ** (z - BATHY_Z), anc = new Map<string, Promise<Float32Array | null>>();
+    const need: number[] = [];
+    for (let i = 0; i < W * W; i++) if (elev[i] === 0) need.push(i);
+    if (need.length) {
+      const n10 = 2 ** BATHY_Z, px10 = n10 * 256;
+      const at = (gx: number, gy: number) => {
+        gx = ((gx % px10) + px10) % px10; gy = Math.max(0, Math.min(px10 - 1, gy));
+        const k = `${gx >> 8}/${gy >> 8}`;
+        return { k, i: (gy & 255) * 256 + (gx & 255) };
+      };
+      const samples = need.map((p) => {
+        const r = p / W | 0, c = p % W;
+        const gx = ((x * 256 + lo + c + 0.5) / f) - 0.5, gy = ((y * 256 + lo + r + 0.5) / f) - 0.5;
+        const x0 = Math.floor(gx), y0 = Math.floor(gy), tx = gx - x0, ty = gy - y0;
+        const pts = [at(x0, y0), at(x0 + 1, y0), at(x0, y0 + 1), at(x0 + 1, y0 + 1)];
+        for (const q of pts) if (!anc.has(q.k)) { const [ax, ay] = q.k.split("/").map(Number); anc.set(q.k, terrariumHeights(up, BATHY_Z, ax, ay)); }
+        return { p, pts, w: [(1 - tx) * (1 - ty), tx * (1 - ty), (1 - tx) * ty, tx * ty] };
+      });
+      const got = new Map<string, Float32Array | null>();
+      await Promise.all([...anc].map(async ([k, pr]) => got.set(k, await pr)));
+      for (const sm of samples) {
+        let v = 0;
+        for (let q = 0; q < 4; q++) v += (got.get(sm.pts[q].k)?.[sm.pts[q].i] ?? 0) * sm.w[q];
+        if (v < 0) { elev[sm.p] = v; filled.push(sm.p); }
+      }
+    }
+  }
   // the pixels' centres
   const rowLat = new Float64Array(W), colLon = new Float64Array(W);
   for (let r = 0; r < W; r++) rowLat[r] = tileYToLat(y + (lo + r + 0.5) / 256, z);
@@ -145,6 +180,8 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
     }
     cover = any ? await lc.sample(lons, lats, 360 / tiles / 256, only) : new Uint8Array(W * W);
   }
+  // a filled pixel the land cover calls land was land at 0 m after all
+  if (cover) for (const p of filled) if (cover[p] !== 0 && cover[p] !== 80) elev[p] = 0;
   const t2 = Date.now();
   // per pixel: is it water, and the surface height
   const isWater = new Uint8Array(W * W), surf = new Float32Array(W * W);
@@ -201,6 +238,14 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
   const normals = gridNormals(key, n, bordered);
   const { lats, lons } = gridLatLon(key, n);
   const rgb = new Uint8Array(3 * n * n);
+  // where bare land is, the region's share of it (desert sand or patchy rock)
+  let share: Float32Array | null = null;
+  if (lc?.desertShare) {
+    const la = new Float64Array(n * n), lo = new Float64Array(n * n);
+    let anyBare = false;
+    for (let v = 0; v < n * n; v++) { la[v] = lats[Math.floor(v / n)]; lo[v] = lons[v % n]; if (cls[v] === CLS.bare) anyBare = true; }
+    if (anyBare) share = await lc.desertShare(la, lo);
+  }
   for (let i = 0; i < n; i++) {
     const { u } = enu(lats[i], 0);
     for (let j = 0; j < n; j++) {
@@ -210,7 +255,7 @@ export async function makeTerrainTile(up: Upstream, key: TileKey, lc: LandCover 
       const ux = u[0] * cl - u[1] * sl, uy = u[0] * sl + u[1] * cl, uz = u[2];
       const slope = 1 - (normals[3 * v] * ux + normals[3 * v + 1] * uy + normals[3 * v + 2] * uz);
       const ice = water[v] ? seaIce(lats[i], lons[j]) : 0;
-      albedo(cls[v], lats[i], lons[j], heights[v], slope, water[v] / 255, depth[v], rgb, 3 * v);
+      albedo(cls[v], lats[i], lons[j], heights[v], slope, water[v] / 255, depth[v], rgb, 3 * v, share ? share[v] : -1);
       if (ice > 0) {
         water[v] = Math.round(water[v] * (1 - ice));
         if (ice > 0.5 && cls[v] === CLS.water) cls[v] = CLS.snow;

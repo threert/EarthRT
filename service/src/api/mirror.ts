@@ -32,6 +32,9 @@ export function allowedOrigin(env: Env, origin: string | null): string | null {
   return null;
 }
 
+/** What compresses well: models, data, text (not images, which are compressed already). */
+const COMPRESSIBLE = /\.(glb|gltf|json|bin|ert|erp|js|cjs|mjs|ts|txt|md)$/i;
+
 const PATH = /^\/p\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9._-]{1,100})\/([0-9a-f]{40})\/(.+)$/;
 
 export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
@@ -55,38 +58,60 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
   const headers = { ...base, "content-type": type, "cache-control": "public, max-age=31536000, immutable" };
 
   const cacheKey = new Request(`${url.origin}${url.pathname}`);
-  const hit = await caches.default.match(cacheKey);
-  if (hit) return withCors(hit, base, req.method);
-
   const key = `mirror/${repo.toLowerCase()}/${sha}/${path}`;
+  const wantGz = req.method === "GET" && COMPRESSIBLE.test(path) && /\bgzip\b/.test(req.headers.get("accept-encoding") ?? "");
+  if (wantGz) {
+    const gz = await env.TILES.get(`${key}#gzip`);
+    if (gz) return gzipped(gz.body, gz.size, headers, sha, "r2+gzip");
+  } else {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return withCors(hit, base, req.method);
+  }
+
   let obj = await env.TILES.get(key);
   let how = "r2";
   if (!obj) {
     // only commits a place was registered at
     const v = await env.DB.prepare("SELECT 1 FROM versions WHERE repo = ? AND sha = ?").bind(repo.toLowerCase(), sha).first();
     if (!v) return new Response("not a registered place commit", { status: 404, headers: { ...base, "cache-control": "no-store" } });
-    let r = await fetch(rawUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
-    if (r.status === 404) return new Response("no such file at that commit", { status: 404, headers: { ...base, "cache-control": "public, max-age=300" } });
-    if (!r.ok) return new Response(`GitHub: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
-    let len = Number(r.headers.get("content-length") ?? NaN);
-    if (len > MAX) return new Response("file larger than 64 MiB", { status: 413, headers: base });
-    // a Git LFS pointer is small text: look at it, then fetch the real bytes
-    let body: ReadableStream | Uint8Array | null = r.body;
-    if (!(len > 200)) {
-      const bytes = new Uint8Array(await r.arrayBuffer());
-      const head = new TextDecoder().decode(bytes.subarray(0, 200));
-      if (head.startsWith("version https://git-lfs.github.com/spec/v1")) {
-        r = await fetch(mediaUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
-        if (!r.ok) return new Response(`GitHub LFS: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
-        len = Number(r.headers.get("content-length") ?? NaN);
-        if (len > MAX) return new Response("file larger than 64 MiB", { status: 413, headers: base });
-        body = r.body;
-        how = "github-lfs";
-      } else {
-        body = bytes;
-        len = bytes.length;
+    // `@release/<tag>/<asset>`: a file of a published GitHub release (city tiles too big for git); the registered
+    // commit's files name them, R2 keeps the first read
+    const rel = /^@release\/([A-Za-z0-9._+-]{1,128})\/([A-Za-z0-9._+-]{1,255})$/.exec(path);
+    if (path.startsWith("@release/") && !rel) return new Response("release paths are @release/<tag>/<asset>", { status: 400, headers: base });
+    let r: Response;
+    let body: ReadableStream | Uint8Array | null;
+    let len: number;
+    if (rel) {
+      r = await fetch(`${env.GITHUB_WEB ?? "https://github.com"}/${repo}/releases/download/${encodeURIComponent(rel[1])}/${encodeURIComponent(rel[2])}`, { headers: { "user-agent": UA }, redirect: "follow" });
+      if (r.status === 404) return new Response("no such release asset", { status: 404, headers: { ...base, "cache-control": "public, max-age=300" } });
+      if (!r.ok) return new Response(`GitHub: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
+      len = Number(r.headers.get("content-length") ?? NaN);
+      body = r.body;
+      how = "github-release";
+    } else {
+      r = await fetch(rawUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
+      if (r.status === 404) return new Response("no such file at that commit", { status: 404, headers: { ...base, "cache-control": "public, max-age=300" } });
+      if (!r.ok) return new Response(`GitHub: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
+      len = Number(r.headers.get("content-length") ?? NaN);
+      body = r.body;
+      how = "github";
+      // a Git LFS pointer is small text: look at it, then fetch the real bytes
+      if (!(len > 200)) {
+        const bytes = new Uint8Array(await r.arrayBuffer());
+        const head = new TextDecoder().decode(bytes.subarray(0, 200));
+        if (head.startsWith("version https://git-lfs.github.com/spec/v1")) {
+          r = await fetch(mediaUrl(env, repo, sha, path), { headers: { "user-agent": UA } });
+          if (!r.ok) return new Response(`GitHub LFS: ${r.status}`, { status: 502, headers: { ...base, "cache-control": "no-store" } });
+          len = Number(r.headers.get("content-length") ?? NaN);
+          body = r.body;
+          how = "github-lfs";
+        } else {
+          body = bytes;
+          len = bytes.length;
+        }
       }
-    } else how = "github";
+    }
+    if (len > MAX) { await r.body?.cancel().catch(() => {}); return new Response("file larger than 64 MiB", { status: 413, headers: base }); }
     if (body instanceof Uint8Array || !(len >= 0)) {
       const bytes = body instanceof Uint8Array ? body : new Uint8Array(await new Response(body).arrayBuffer());
       if (bytes.length > MAX) return new Response("file larger than 64 MiB", { status: 413, headers: base });
@@ -100,6 +125,12 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
     obj = await env.TILES.get(key);
     if (!obj) return new Response("mirror write failed", { status: 502, headers: base });
   }
+  // compressible files go out gzipped to clients that take it (a GLB loses ~40 %): made once, kept beside the plain copy
+  if (wantGz && obj.size > 1024 && obj.size <= 48 * 1024 * 1024) {
+    const z = await new Response(obj.body.pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+    ctx.waitUntil(env.TILES.put(`${key}#gzip`, z, { httpMetadata: { contentType: type, contentEncoding: "gzip" } }));
+    return gzipped(z, z.byteLength, headers, sha, `${how}+gzip-made`);
+  }
   const res = new Response(obj.body, { headers: { ...headers, "content-length": String(obj.size), etag: `"${sha}"`, "x-earthrt": how } });
   // the cache keeps a copy without CORS headers (they depend on the asker)
   const plain = new Headers(res.headers);
@@ -109,6 +140,13 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
   ctx.waitUntil(caches.default.put(cacheKey, toCache).catch(() => {}));
   if (req.method === "HEAD") { a.cancel().catch(() => {}); return new Response(null, { headers: res.headers }); }
   return new Response(a, { headers: res.headers });
+}
+
+function gzipped(body: ReadableStream | ArrayBuffer, size: number, headers: Record<string, string>, sha: string, how: string) {
+  return new Response(body, {
+    encodeBody: "manual",
+    headers: { ...headers, "content-encoding": "gzip", "content-length": String(size), vary: "origin, accept-encoding", etag: `"${sha}-gz"`, "x-earthrt": how },
+  });
 }
 
 function withCors(hit: Response, base: Record<string, string>, method: string) {
