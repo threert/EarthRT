@@ -260,3 +260,13 @@ describe("flight, sun, places", () => {
     expect(Math.hypot(...t.position)).toBeLessThan(20_000_000);
   });
 });
+
+describe("enterFrom", () => {
+  test("checked and defaulted by kind", async () => {
+    const { ENTER_FROM } = await import("../src/places.ts");
+    const ok = { format: "earthrt/place@1", id: "gion-machiya", title: "A machiya", kind: "interior", anchor: { lat: 35, lon: 135.7 }, bounds: { radius: 30 }, content: [{ type: "glb", uri: "assets/a.glb" }] };
+    expect(validatePlace({ ...ok, enterFrom: 60 })).toEqual([]);
+    expect(validatePlace({ ...ok, enterFrom: -1 }).length).toBe(1);
+    expect(ENTER_FROM.interior).toBe(80);
+  });
+});

@@ -1,9 +1,9 @@
 # EarthRT
 
-**The whole Earth, path-traced.** A globe built from open data, with cities, sites and rooms that anyone makes in a
-GitHub repository and puts on the map. In any browser at its own address; path-traced by
-[ThreeRT](https://github.com/meshy-dev/ThreeRT) in the EarthRT app (macOS first), every light traced, MetalFX or DLSS
-Ray Reconstruction denoising.
+**The whole Earth, and its places path-traced.** A globe built from open data, with cities, sites and rooms that
+anyone makes in a GitHub repository and puts on the map. The globe runs in any browser at its own address and in the
+EarthRT app (macOS first); in the app, going into a place shows it path-traced by
+[ThreeRT](https://github.com/meshy-dev/ThreeRT), every light traced, MetalFX or DLSS Ray Reconstruction denoising.
 
 > Status: the skeleton is being built ([docs/ROADMAP.md](docs/ROADMAP.md)). Nothing here is stable yet.
 
@@ -16,9 +16,10 @@ Ray Reconstruction denoising.
   hold (GLB models, a ThreeRT scene module, or a city's own tiles). Register one, or give the repository the
   `earthrt-place` topic, and the index pulls it in. When several people make the same city, the best liked is shown and the
   others are a click away; eras (Kyoto in the Meiji era, in the Shōwa era) are versions too.
-- **Two renderers, one core.** `packages/core` is the logic both share: geodesy, a floating frame for 32-bit GPUs,
-  which tiles a view needs, how tiles are read, flights, choosing versions. `web/` draws it with three.js; `app/` is
-  the globe's ThreeRT scene script, which the native app (`native/`) path-traces.
+- **Two renderers, each where it is best, one core.** The globe is a map: `web/` draws it with three.js, on the web
+  and inside the app. A place is where light matters: `traced/` path-traces it with ThreeRT in the app.
+  `packages/core` is the logic both share: geodesy, a floating frame for 32-bit GPUs, which tiles a view needs, how
+  tiles are read, flights, choosing versions.
 - **Making places** happens in the app: Create at a spot or Remix a place (from
   [the template](https://github.com/threert/earth-place-template)), and your own Claude Code or Codex builds it in the
   app's agent panel, with Meshy for the models; it shows inside the globe as it changes.
@@ -31,9 +32,9 @@ Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and [docs/SPEC.
 | --- | --- |
 | `packages/core` | `@earthrt/core`, plain TypeScript, no DOM: runs in browsers, Workers, Bun and the app's QuickJS (ThreeRT's script engine) |
 | `service` | the Cloudflare Worker: trunk tiles, the places registry, the GitHub mirror, the web app's files |
-| `web` | the web engine (three.js) |
-| `app` | the globe's ThreeRT scene script (what the native app runs) |
-| `native` | the EarthRT app: Rust core on ThreeRT, SwiftUI for macOS, a Bun sidecar for the coding agent |
+| `web` | the map engine (three.js): the website, and the map inside the app |
+| `traced` | the traced view: a place and its surroundings, path-traced (a ThreeRT scene script) |
+| `native` | the EarthRT app: SwiftUI for macOS, the map in a WebView, the traced view on ThreeRT (Rust core), a Bun sidecar for the coding agent |
 | `tools` | baking, probes, registration, deployment |
 | `engine` | ThreeRT, as a submodule |
 
