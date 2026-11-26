@@ -69,8 +69,9 @@ const SEA_ICE: RGB = [226, 232, 240];
 /** How dry the climate is (0 wet … 1 arid) from latitude alone (the subtropical belts), with noise. */
 function aridity(lat: number, lon: number) {
   const a = Math.abs(lat);
-  const belt = smooth(10, 20, a) * (1 - smooth(32, 42, a));
-  return clamp01(belt * 0.85 + (fbm(lat, lon, 6, 11) - 0.5) * 0.5);
+  // the subtropical dry belts; the land cover itself says where it is a desert (bare, shrub), so this only tints
+  const belt = smooth(12, 18, a) * (1 - smooth(28, 34, a));
+  return clamp01(belt * 0.6 + (fbm(lat, lon, 6, 11) - 0.5) * 0.3);
 }
 
 /** Altitude of the permanent snow line at a latitude, m. */
@@ -109,7 +110,7 @@ export function albedo(cls: number, lat: number, lon: number, h: number, slope: 
     case CLS.built: c = BUILT; break;
     case CLS.bare: {
       // deserts sand-coloured, red in places (Sahara's east, Australia), rock elsewhere and at high latitudes
-      const desert = smooth(0.2, 0.55, arid) * (1 - smooth(45, 55, a));
+      const desert = (1 - smooth(42, 52, a)) * (1 - smooth(2500, 4000, h));
       c = mix(mix(ROCK, ROCK_DARK, n2 * 0.6), mix(SAND, SAND_RED, smooth(0.45, 0.75, fbm(lat, lon, 3, 5))), desert);
       break;
     }
