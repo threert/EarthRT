@@ -1,0 +1,56 @@
+# EarthRT for macOS, as an xcodegen spec (`bun native/tools/macos.ts` generates the Xcode project and builds it). The
+# app is SwiftUI; the globe is the Rust static library in native/core (libearthrt_core.a) on ThreeRT in engine/.
+# Shaped like threert/native-app-template's macos/ (MIT, Meshy LLC).
+name: EarthRT
+options:
+  bundleIdPrefix: dev.threert
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+targets:
+  EarthRT:
+    type: application
+    platform: macOS
+    sources:
+      - path: App
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.threert.earthrt
+        PRODUCT_NAME: EarthRT
+        EXECUTABLE_NAME: EarthRT
+        INFOPLIST_FILE: App/Info.plist
+        GENERATE_INFOPLIST_FILE: NO
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_OBJC_BRIDGING_HEADER: App/Core.h
+        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/../core/target/release
+        OTHER_LDFLAGS: ["-learthrt_core", "-lc++", "-lresolv"]
+        ARCHS: arm64
+        ONLY_ACTIVE_ARCH: YES
+        DEAD_CODE_STRIPPING: YES
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+        DEVELOPMENT_TEAM: ""
+        # The coding agents are the user's own command-line tools, started as child processes: no App Sandbox.
+        ENABLE_APP_SANDBOX: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS: NO
+        # Where the repository is, for a build run from it (the sidecar, the globe's bundle, the engine's presets).
+        EARTHRT_ROOT: $(PROJECT_DIR)/../..
+    dependencies:
+      - sdk: Metal.framework
+      - sdk: QuartzCore.framework
+      - sdk: AppKit.framework
+      - sdk: CoreGraphics.framework
+      - sdk: CoreText.framework
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: IOKit.framework
+      - sdk: IOSurface.framework
+      - sdk: AudioToolbox.framework
+      - sdk: CoreAudio.framework
+      - sdk: CFNetwork.framework
