@@ -181,6 +181,17 @@ describe("mirror", () => {
     expect(r.status).toBe(200);
     expect(new Uint8Array(await r.arrayBuffer())).toEqual(BIG);
   });
+  test("compressible files go out gzipped when asked", async () => {
+    for (const how of ["gzip", "r2+gzip"]) {
+      const r = await call(`/p/alice/sample-cube/${SHA2}/models/big.glb`, { headers: { "accept-encoding": "gzip" } });
+      expect(r.status).toBe(200);
+      expect(r.headers.get("x-earthrt")).toContain(how);
+      expect(new Uint8Array(await r.arrayBuffer())).toEqual(BIG); // fetch decodes it
+      await Bun.sleep(200);
+    }
+    const plain = await call(`/p/alice/sample-cube/${SHA2}/models/big.glb`, { headers: { "accept-encoding": "identity" } });
+    expect(new Uint8Array(await plain.arrayBuffer())).toEqual(BIG);
+  });
   test("release assets by @release/<tag>/<asset>", async () => {
     const r = await call(`/p/alice/sample-cube/${SHA}/@release/v0.1.0/15-1-2.ert`);
     expect(r.status).toBe(200);

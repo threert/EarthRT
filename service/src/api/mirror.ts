@@ -32,6 +32,9 @@ export function allowedOrigin(env: Env, origin: string | null): string | null {
   return null;
 }
 
+/** What compresses well: models, data, text (not images, which are compressed already). */
+const COMPRESSIBLE = /\.(glb|gltf|json|bin|ert|erp|js|cjs|mjs|ts|txt|md)$/i;
+
 const PATH = /^\/p\/([A-Za-z0-9][A-Za-z0-9-]{0,38})\/([A-Za-z0-9._-]{1,100})\/([0-9a-f]{40})\/(.+)$/;
 
 export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> {
@@ -55,10 +58,16 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
   const headers = { ...base, "content-type": type, "cache-control": "public, max-age=31536000, immutable" };
 
   const cacheKey = new Request(`${url.origin}${url.pathname}`);
-  const hit = await caches.default.match(cacheKey);
-  if (hit) return withCors(hit, base, req.method);
-
   const key = `mirror/${repo.toLowerCase()}/${sha}/${path}`;
+  const wantGz = req.method === "GET" && COMPRESSIBLE.test(path) && /\bgzip\b/.test(req.headers.get("accept-encoding") ?? "");
+  if (wantGz) {
+    const gz = await env.TILES.get(`${key}#gzip`);
+    if (gz) return gzipped(gz.body, gz.size, headers, sha, "r2+gzip");
+  } else {
+    const hit = await caches.default.match(cacheKey);
+    if (hit) return withCors(hit, base, req.method);
+  }
+
   let obj = await env.TILES.get(key);
   let how = "r2";
   if (!obj) {
@@ -116,6 +125,12 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
     obj = await env.TILES.get(key);
     if (!obj) return new Response("mirror write failed", { status: 502, headers: base });
   }
+  // compressible files go out gzipped to clients that take it (a GLB loses ~40 %): made once, kept beside the plain copy
+  if (wantGz && obj.size > 1024 && obj.size <= 48 * 1024 * 1024) {
+    const z = await new Response(obj.body.pipeThrough(new CompressionStream("gzip"))).arrayBuffer();
+    ctx.waitUntil(env.TILES.put(`${key}#gzip`, z, { httpMetadata: { contentType: type, contentEncoding: "gzip" } }));
+    return gzipped(z, z.byteLength, headers, sha, `${how}+gzip-made`);
+  }
   const res = new Response(obj.body, { headers: { ...headers, "content-length": String(obj.size), etag: `"${sha}"`, "x-earthrt": how } });
   // the cache keeps a copy without CORS headers (they depend on the asker)
   const plain = new Headers(res.headers);
@@ -125,6 +140,13 @@ export async function handleMirror(req: Request, env: Env, ctx: ExecutionContext
   ctx.waitUntil(caches.default.put(cacheKey, toCache).catch(() => {}));
   if (req.method === "HEAD") { a.cancel().catch(() => {}); return new Response(null, { headers: res.headers }); }
   return new Response(a, { headers: res.headers });
+}
+
+function gzipped(body: ReadableStream | ArrayBuffer, size: number, headers: Record<string, string>, sha: string, how: string) {
+  return new Response(body, {
+    encodeBody: "manual",
+    headers: { ...headers, "content-encoding": "gzip", "content-length": String(size), vary: "origin, accept-encoding", etag: `"${sha}-gz"`, "x-earthrt": how },
+  });
 }
 
 function withCors(hit: Response, base: Record<string, string>, method: string) {
