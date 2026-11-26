@@ -21,7 +21,7 @@ if (process.argv.includes("--watch")) {
   for (const dir of [join(web, "src"), join(web, "index.html"), resolve(web, "../packages/core/src")]) {
     watch(dir, { recursive: true }, () => {
       clearTimeout(timer);
-      timer = setTimeout(() => build().catch((e) => console.error(e)), 120);
+      timer = setTimeout(() => build(true, false).catch((e) => console.error(e)), 120);
     });
   }
 }

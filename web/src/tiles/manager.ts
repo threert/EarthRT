@@ -167,7 +167,7 @@ export class TileManager<O> {
     // a flight's look-ahead: what it will show soon, at a fraction of the priority
     const ahead = new Set<string>();
     for (const [i, v] of (opt.lookahead ?? []).entries()) {
-      const s = selectTiles(v, { threshold: opt.threshold * 1.25, maxZoom, info });
+      const s = selectTiles(v, { threshold: opt.threshold * 1.5, maxZoom, info });
       for (const k of s.touched) {
         const e = this.entries.get(T(k));
         if (e) e.lastUsed = this.frame;
@@ -176,7 +176,9 @@ export class TileManager<O> {
         const id = T(keyOf(w.key));
         if (ahead.has(id) || requests.some((r) => r.id === id)) continue;
         ahead.add(id);
-        requests.push({ id, url: this.source.url("terrain", keyOf(w.key)), priority: (w.priority / (2 + i)) * 1e-3 });
+        // ranked with the view's own by screen error, discounted by how far ahead: a tile the next seconds need badly
+        // (a coarse level over a new region) goes before fine detail the view merely wants
+        requests.push({ id, url: this.source.url("terrain", keyOf(w.key)), priority: (w.priority * 0.6) / (1 + 0.25 * i) });
       }
     }
     this.lowUrls = new Set(requests.filter((r) => ahead.has(r.id)).map((r) => r.url));

@@ -9,9 +9,11 @@ const web = resolve(import.meta.dirname, "..");
 const out = join(web, "dist");
 const minify = !process.argv.includes("--dev");
 
-export async function build(log = true) {
+/** `clean`: empty static/ first (a release build); the dev server keeps old hashed files so a page loading during a
+ *  rebuild still finds its scripts. */
+export async function build(log = true, clean = true) {
   const t0 = performance.now();
-  rmSync(join(out, "static"), { recursive: true, force: true });
+  if (clean) rmSync(join(out, "static"), { recursive: true, force: true });
   mkdirSync(join(out, "static"), { recursive: true });
   const common = { target: "browser" as const, format: "esm" as const, minify, sourcemap: minify ? ("none" as const) : ("linked" as const) };
   const w = await Bun.build({ ...common, entrypoints: [join(web, "src/tiles/worker.ts")], outdir: join(out, "static"), naming: "worker-[hash].[ext]" });

@@ -306,12 +306,13 @@ export class Places {
     return n;
   }
 
-  /** A place's minDistance where the point is inside a loaded place's bounds (ARCHITECTURE § 4), else undefined. */
+  /** A place's minDistance near a loaded place (ARCHITECTURE § 4: a place earns close views; around it too, so the
+   *  camera can come down to it: within 3× its radius, at least 150 m), else undefined. */
   minDistanceAt(lat: number, lon: number): number | undefined {
     let best: number | undefined;
     for (const l of this.loaded.values()) {
       const m = l.record.manifest;
-      if (haversine(lat, lon, m.anchor.lat, m.anchor.lon) > placeRadius(m) * 1.2) continue;
+      if (haversine(lat, lon, m.anchor.lat, m.anchor.lon) > Math.max(150, placeRadius(m) * 3)) continue;
       const d = m.minDistance ?? 1;
       best = best === undefined ? d : Math.min(best, d);
     }

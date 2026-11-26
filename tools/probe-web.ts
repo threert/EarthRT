@@ -93,6 +93,13 @@ out.firstView = {
 };
 console.log("first view", out.firstView);
 if (!process.argv.includes("--skip-flight")) {
+  // first a flight to warm the service's edge for the route (the tiles are then the same for both runs: only the
+  // page's prefetching differs), unless --cold
+  if (!process.argv.includes("--cold")) {
+    const w = await flight(true);
+    out.flightWarmup = w;
+    console.log("warm-up flight (service edge cold):", w);
+  }
   for (const la of [true, false]) {
     const f = await flight(la);
     out[la ? "flight" : "flightNoLookahead"] = f;
