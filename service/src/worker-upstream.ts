@@ -5,6 +5,19 @@ import type { Upstream } from "./gen/upstream.ts";
 const MISSING = "x-earthrt-missing";
 const TTL = 60 * 60 * 24 * 30;
 
+/** A second request when the first is slow (S3's tail): the first answer wins. */
+function hedged(make: () => Promise<Response>, after = 1200): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    let settled = false, failures = 0, started = 1;
+    const go = () => make().then(
+      (r) => { if (!settled) { settled = true; resolve(r); } else r.body?.cancel().catch(() => {}); },
+      (e) => { if (++failures === started && !settled) { settled = true; reject(e); } },
+    );
+    go();
+    setTimeout(() => { if (!settled) { started++; go(); } }, after);
+  });
+}
+
 async function cachedFetch(key: string, make: () => Promise<Response>, ctx?: ExecutionContext): Promise<Uint8Array | null> {
   const cache = caches.default;
   const req = new Request(key);
@@ -17,7 +30,7 @@ async function cachedFetch(key: string, make: () => Promise<Response>, ctx?: Exe
   let err: unknown;
   for (let i = 0; i < 3; i++) {
     try {
-      r = await make();
+      r = await hedged(make);
       if (r.status < 500) break;
       await r.body?.cancel();
       err = new Error(`${r.status} ${key}`);
