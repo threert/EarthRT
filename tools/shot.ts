@@ -14,6 +14,7 @@ export const PLACES: Record<string, { place: string; at?: string; time?: string 
   // over the roofs of Karasuma street, 400 m north of the tower, looking south at it
   tower: { place: "threert/earth-sample-kyoto-tower/kyoto-tower", at: "34.9912,135.7596,95,184,4", time: "15" },
   "tower-lowpoly": { place: "threert/earth-sample-kyoto-tower-lowpoly/kyoto-tower", at: "34.9912,135.7596,95,184,4", time: "15" },
+  "tower-street": { place: "threert/earth-sample-kyoto-tower/kyoto-tower", at: "34.9893,135.75945,31.5,186,20", time: "15" },
   "tower-air": { place: "threert/earth-sample-kyoto-tower/kyoto-tower", at: "34.9830,135.7550,250,35,-12", time: "15" },
   cube: { place: "threert/earth-sample-cube/sample-cube", time: "15" },
 };
@@ -21,7 +22,7 @@ export const PLACES: Record<string, { place: string; at?: string; time?: string 
 const args = process.argv.slice(2);
 const val = (k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
 const outDir = val("--out") ?? join(root, "out/s4");
-const takesValue = new Set(["--out", "--assets", "--after", "--wait", "--suffix", "--at", "--time", "--place", "--name"]);
+const takesValue = new Set(["--reconstruction", "--out", "--assets", "--after", "--wait", "--suffix", "--at", "--time", "--place", "--name"]);
 const names = args.filter((a, i) => !a.startsWith("--") && !takesValue.has(args[i - 1]));
 const jobs: { name: string; launch: Record<string, string> }[] = [];
 for (const n of names) {
@@ -37,7 +38,7 @@ for (const j of jobs) {
 if (!args.includes("--no-build")) execFileSync("bun", [join(root, "traced/build.ts")], { stdio: "inherit" });
 for (const j of jobs) {
   const t0 = Date.now();
-  const live = await startLive(join(root, "traced/dist/traced.js"), { assets: val("--assets") ?? join(root, "out/real"), online: !args.includes("--offline"), traced: args.includes("--traced"), launch: j.launch });
+  const live = await startLive(join(root, "traced/dist/traced.js"), { assets: val("--assets") ?? join(root, "out/real"), online: !args.includes("--offline"), traced: args.includes("--traced"), launch: j.launch, ...(val("--reconstruction") ? { reconstruction: val("--reconstruction") } : {}) });
   try {
     const ready = await live.wait((l) => l.includes("traced: ready"), Number(val("--wait") ?? 120) * 1000).catch(() => "(not ready: shot anyway)");
     console.log(`  ${ready.replace(/^\[game\] /, "")}`);

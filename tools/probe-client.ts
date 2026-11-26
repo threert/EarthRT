@@ -1,27 +1,45 @@
-// The client's streaming probe (ROADMAP "how work is judged"): the package on a fixed route in the engine's live view
-// at 1280 x 720 (the GPU lock held), frame time p50 / p95 / p99 from the engine's frame log, the commit time a frame
-// (`edit`), the script's own time and adds, coarse tiles (still on their way) and the process's memory.
-//   bun tools/probe-client.ts [flight|descent] [--online] [--assets out/tiles] [--reconstruction metalfx-denoised,builtin]
-//                             [--api URL] [--out out/s4/probe-<route>.json]
+// The traced view's probe (ROADMAP S4): the script in the engine's live view at 1280 x 720 with the GPU lock, this
+// script as the app (it answers assets.fetch and net.fetch, lists "assets" and "traced"). It enters the Kyoto places
+// one after another with `traced.open`, as the app does, and measures for each: the time to `traced.ready` (from the
+// cache after the first round), the frame interval p50 / p95 / p99 while still and while walking, the commit time, and
+// the process's memory after it (entries in a row must not grow it).
+//   bun tools/probe-client.ts [--rounds 3] [--reconstruction metalfx-denoised,builtin] [--assets out/real] [--out out/s4/probe.json]
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { root, startLive } from "./lib/live.ts";
+import { PLACES } from "./places.ts";
 
 const args = process.argv.slice(2);
 const val = (k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
-const route = args.find((a) => !a.startsWith("--") && !args[args.indexOf(a) - 1]?.startsWith("--")) ?? "flight";
-const out = val("--out") ?? join(root, `out/s4/probe-${route}.json`);
-const frameLog = join(root, `out/s4/probe-${route}.frames.jsonl`);
+const out = val("--out") ?? join(root, "out/s4/probe.json");
+const frameLog = out.replace(/\.json$/, ".frames.jsonl");
+const rounds = Number(val("--rounds") ?? 3);
+const api = val("--api") ?? "https://earth.threert.dev";
 mkdirSync(dirname(out), { recursive: true });
 if (!args.includes("--no-build")) execFileSync("bun", [join(root, "traced/build.ts")], { stdio: "inherit" });
-const launch: Record<string, string> = { probe: route, time: "12" };
-if (val("--api")) launch.api = val("--api")!;
+
+const curl = (url: string) => execFileSync("curl", ["-s", "-L", "--max-time", "30", ...(process.env.HTTPS_PROXY ? ["-x", process.env.HTTPS_PROXY] : []), url], { encoding: "utf8" });
+const names = ["machiya", "tower", "tower-lowpoly", "tower-air"].filter((n) => PLACES[n]);
+const records = new Map<string, unknown>();
+for (const n of names) {
+  const id = PLACES[n].place;
+  if (!records.has(id)) {
+    const j = JSON.parse(curl(`${api}/api/v1/places/${id}`));
+    records.set(id, j.manifest ? j : j.place);
+  }
+}
+const camera = (n: string) => {
+  const at = PLACES[n].at;
+  if (!at) return undefined;
+  const [lat, lon, alt, heading, pitch] = at.split(",").map(Number);
+  return { lat, lon, alt, heading, pitch, fov: 50 };
+};
+
 const live = await startLive(join(root, "traced/dist/traced.js"), {
-  assets: val("--assets"), online: args.includes("--online"), earth: args.includes("--earth"), launch, frameLog, quiet: true,
-  reconstruction: val("--reconstruction") ?? "metalfx-denoised,builtin",
+  assets: val("--assets") ?? join(root, "out/real"), online: true, traced: true, frameLog, quiet: true,
+  launch: { width: "1280", height: "720" }, reconstruction: val("--reconstruction") ?? "metalfx-denoised,builtin",
 });
-const pid = (live as unknown as { pid?: number }).pid;
 const footprint = (): number => {
   try {
     const p = execFileSync("pgrep", ["-n", "-f", "threert-render live"], { encoding: "utf8" }).trim();
@@ -31,33 +49,41 @@ const footprint = (): number => {
     return NaN;
   }
 };
-void pid;
-const mem: number[] = [];
-const sampler = setInterval(() => mem.push(footprint()), 5000);
-const t0 = Date.now();
-await live.wait((l) => l.includes("earth-probe end"), 20 * 60_000).catch((e) => console.log(`(no end: ${e.message})`));
-clearInterval(sampler);
-mem.push(footprint());
-await live.snapshot(join(root, `out/s4/probe-${route}-end.png`), 8);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const frames = () => readFileSync(frameLog, "utf8").trim().split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } }) as { interval: number; gpu: number; edit?: number }[];
+const q = (a: number[], p: number) => { const s = [...a].sort((x, y) => x - y); return s.length ? +s[Math.min(s.length - 1, Math.floor(s.length * p))].toFixed(1) : NaN; };
+const stats = (F: { interval: number; gpu: number; edit?: number }[]) => ({ frames: F.length, p50: q(F.map((f) => f.interval), 0.5), p95: q(F.map((f) => f.interval), 0.95), p99: q(F.map((f) => f.interval), 0.99), gpu50: q(F.map((f) => f.gpu), 0.5), commit95: q(F.map((f) => f.edit ?? 0), 0.95) });
+
+const entries: unknown[] = [];
+let k = 0;
+for (let r = 0; r < rounds; r++) {
+  for (const n of names) {
+    k++;
+    const mark = live.lines.length;
+    const t0 = Date.now();
+    live.send({ cmd: "host", messages: [{ t: "traced.open", place: records.get(PLACES[n].place), camera: camera(n), utc: Date.UTC(2026, 5, 21, 6, 0) }] });
+    let ready = NaN;
+    for (let w = 0; w < 1200 && isNaN(ready); w++) {
+      if (live.lines.slice(mark).some((l) => l.includes("traced: ready"))) ready = (Date.now() - t0) / 1000;
+      else await sleep(100);
+    }
+    const n0 = frames().length;
+    await sleep(4000);
+    const still = frames().slice(n0);
+    // walking: the app's input, W held for 3 s
+    const n1 = frames().length;
+    live.send({ cmd: "host", messages: [{ t: "input", keys: ["W"] }] });
+    await sleep(3000);
+    live.send({ cmd: "host", messages: [{ t: "input", keys: [] }] });
+    const walk = frames().slice(n1);
+    const e = { k, round: r, place: n, readyS: +ready.toFixed(2), still: stats(still), walk: stats(walk), memoryGB: +footprint().toFixed(2) };
+    entries.push(e);
+    console.log(JSON.stringify(e));
+  }
+}
+await live.snapshot(join(root, "out/s4/probe-end.png"), 8);
 await live.quit();
-const probe = live.lines.filter((l) => l.includes("earth-probe {")).map((l) => JSON.parse(l.slice(l.indexOf("{"))));
-const F = readFileSync(frameLog, "utf8").trim().split("\n").flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } }) as { interval: number; gpu: number; edit?: number; rebuild?: number; scale?: number; fallback?: string }[];
-const q = (a: number[], p: number) => { const s = [...a].sort((x, y) => x - y); return s[Math.min(s.length - 1, Math.floor(s.length * p))]; };
-const iv = F.map((f) => f.interval).filter((x) => x > 0), gpu = F.map((f) => f.gpu), edit = F.map((f) => f.edit ?? 0);
-const result = {
-  route, online: args.includes("--online"), seconds: (Date.now() - t0) / 1000, frames: F.length,
-  interval: { p50: q(iv, 0.5), p95: q(iv, 0.95), p99: q(iv, 0.99), max: q(iv, 1), over33: iv.filter((x) => x > 33.4).length, over50: iv.filter((x) => x > 50).length },
-  fps: 1000 / q(iv, 0.5),
-  gpu: { p50: q(gpu, 0.5), p95: q(gpu, 0.95) },
-  commit: { p50: q(edit, 0.5), p95: q(edit, 0.95), p99: q(edit, 0.99), max: q(edit, 1) },
-  rebuilds: F.filter((f) => (f.rebuild ?? 0) > 1).map((f) => ({ ms: Math.round(f.rebuild!), why: f.fallback })).slice(0, 10),
-  scale: q(F.map((f) => f.scale ?? 1), 0.5),
-  script: { avg: probe.reduce((s, p) => s + p.scriptAvg, 0) / Math.max(1, probe.length), max: Math.max(0, ...probe.map((p) => p.scriptMax)), selectMax: Math.max(0, ...probe.map((p) => p.selectMs)), addMaxMs: Math.max(0, ...probe.map((p) => p.maxAddMs)) },
-  tiles: { added: probe.reduce((s, p) => s + p.added, 0), removed: probe.reduce((s, p) => s + p.removed, 0), maxResident: Math.max(0, ...probe.map((p) => p.tiles)), maxResidentTris: Math.max(0, ...probe.map((p) => p.tris)), maxShownTris: Math.max(0, ...probe.map((p) => p.shownTris)), holes: probe.filter((p) => p.holes).length, coarseMax: Math.max(0, ...probe.map((p) => p.coarse)) },
-  memoryGB: { peak: Math.max(...mem.filter((x) => !isNaN(x))), end: mem[mem.length - 1], samples: mem.map((x) => +x.toFixed(2)) },
-  fetched: live.fetches.n, fetchedMB: +(live.fetches.bytes / 1048576).toFixed(1), fetchMs: { p50: q(live.fetches.ms, 0.5), p95: q(live.fetches.ms, 0.95) },
-  interrupted: live.lines.filter((l) => l.includes("interrupted")).length,
-};
-writeFileSync(out, JSON.stringify({ result, probe }, null, 1));
+const interrupted = live.lines.filter((l) => l.includes("interrupted")).length;
+writeFileSync(out, JSON.stringify({ reconstruction: val("--reconstruction") ?? "metalfx-denoised,builtin", interrupted, entries }, null, 1));
 writeFileSync(out.replace(/\.json$/, ".log"), live.lines.join("\n"));
-console.log(JSON.stringify(result, null, 1));
+console.log(`interrupted frames: ${interrupted}; ${out}`);
