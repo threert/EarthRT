@@ -81,6 +81,7 @@ export class Ui {
       this.app.liveTime = true;
       this.app.time = Date.now();
     };
+    $("attribution").onclick = () => $("attribution").classList.toggle("open");
     const dl = $("destinations");
     for (const d of DESTINATIONS) {
       const b = document.createElement("button");
@@ -179,6 +180,7 @@ export class Ui {
     const m = p.manifest;
     const panel = $("panel");
     panel.hidden = false;
+    document.body.classList.add("panel-open");
     $("panel-title").textContent = m.title;
     $("panel-summary").textContent = m.summary ?? "";
     const repoUrl = p.repo.startsWith("dev/") ? null : `https://github.com/${p.repo}`;
@@ -257,6 +259,7 @@ export class Ui {
   hidePlace() {
     this.panelPlace = null;
     $("panel").hidden = true;
+    document.body.classList.remove("panel-open");
   }
 
   // ------------------------------------------------------------------------------------------------------ flights

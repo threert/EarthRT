@@ -168,7 +168,13 @@ void main() {
   Light l = lightAt(vWorld);
   vec3 Nl;
   vec3 c = land(N, fw, l, Nl);
-  if (vWater > 0.01) c = mix(c, sea(l.up, fw, l), smoothstep(0.2, 0.8, vWater));
+  if (vWater > 0.01) {
+    // a sharp shore where the grid's interpolated mask crosses one half, frayed by noise so the grid's zigzag does not
+    // show (fading to the plain blend where a pixel covers several cells)
+    float fray = (noiseAt(vDetail, 8.0).r - 0.5) * 0.35 * detailFade(16.0, fw);
+    float edge = mix(0.3, 0.06, detailFade(24.0, fw));
+    c = mix(c, sea(l.up, fw, l), smoothstep(0.5 - edge, 0.5 + edge, vWater + fray));
+  }
   outColor = vec4(c, 1.0);
   // inside a place the place's own ground wins over the trunk's (coplanar floors would fight): pushed back 1% + 15 cm
   float w = vFragDepth - 1.0;

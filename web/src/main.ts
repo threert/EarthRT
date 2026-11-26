@@ -191,6 +191,9 @@ export class App {
     this.height = h;
     this.dpr = this.launch.dpr ?? Math.min(window.devicePixelRatio || 1, this.mobile ? 2 : 2);
     this.globe.resize(w, h, this.dpr);
+    // the vertical field of view: 45° in landscape; in portrait, wide enough to keep a landscape's sideways view
+    const a = w / h;
+    this.fov = a >= 1 ? 45 : Math.min(75, (2 * Math.atan((Math.tan((22.5 * Math.PI) / 180) * 0.8) / a) * 180) / Math.PI);
   }
 
   get size() { return { w: this.width, h: this.height }; }

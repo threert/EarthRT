@@ -48,6 +48,8 @@ export class Places {
   /** The version shown for each topic (base). */
   chosen = new Map<string, PlaceRecord>();
   choice: Record<string, string> = loadChoice();
+  /** Versions opened by a link or a search this visit: shown, not remembered. */
+  private visitChoice: Record<string, string> = {};
   readonly loaded = new Map<string, Loaded>();
   available = true;
   dev: PlaceRecord | null = null;
@@ -91,6 +93,7 @@ export class Places {
 
   /** Make a version the one shown for its topic (remembered). */
   choose(p: PlaceRecord) {
+    delete this.visitChoice[topicBase(p.topic)];
     this.choice[topicBase(p.topic)] = p.id;
     saveChoice(this.choice);
     this.rechoose();
@@ -99,7 +102,7 @@ export class Places {
   private rechoose() {
     const list = [...this.records.values()];
     if (this.dev) list.push(this.dev);
-    const choice = { ...this.choice };
+    const choice = { ...this.choice, ...this.visitChoice };
     if (this.dev) choice[topicBase(this.dev.topic)] = this.dev.id;
     this.chosen = chooseVersions(list, choice);
     // drop loaded places that are no longer the chosen version
@@ -111,6 +114,8 @@ export class Places {
   async open(id: string, go: boolean) {
     try {
       const p = await this.get(id);
+      // the version asked for is the one shown (this visit; the panel's "Show" remembers a choice)
+      this.visitChoice[topicBase(p.topic)] = p.id;
       this.rechoose();
       this.app.ui.showPlace(p);
       if (go) this.goTo(p);
@@ -316,14 +321,16 @@ export class Places {
   }
 
   /** A place's minDistance near a known place (ARCHITECTURE § 4: a place earns close views; around it too, so the
-   *  camera can come down to it: within 3× its radius, at least 150 m), else undefined. */
+   *  camera can come down to it: within 3× its radius, at least 150 m, and out to its start view), else undefined. */
   minDistanceAt(lat: number, lon: number): number | undefined {
     let best: number | undefined;
     // every place the page knows (the chosen versions), loaded or not: the camera must be able to come down to a
     // place before it loads (it loads within its visibleFrom)
     for (const p of this.chosen.values()) {
       const m = p.manifest;
-      if (haversine(lat, lon, m.anchor.lat, m.anchor.lon) > Math.max(150, placeRadius(m) * 3)) continue;
+      // (and as far as its own start view, which must be reachable)
+      const start = m.start ? Math.hypot(m.start.position[0], m.start.position[2]) * 1.25 : 0;
+      if (haversine(lat, lon, m.anchor.lat, m.anchor.lon) > Math.max(150, placeRadius(m) * 3, start)) continue;
       const d = m.minDistance ?? 1;
       best = best === undefined ? d : Math.min(best, d);
     }

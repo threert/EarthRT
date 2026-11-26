@@ -131,10 +131,15 @@ button { cursor: pointer; }
   #brand { display: none; }
   #actions .wide { display: none; }
   #destinations { top: calc(max(12px, env(safe-area-inset-top)) + 46px); }
-  #panel { top: auto; bottom: 64px; max-height: 55vh; }
-  #bottom { flex-wrap: wrap; }
-  #attribution { order: 3; flex-basis: 100%; }
-  #time { width: 90px; }
+  .panel-open #destinations { display: none; }
+  #panel { top: auto; bottom: calc(max(8px, env(safe-area-inset-bottom)) + 66px); max-height: 46vh; }
+  #bottom { flex-wrap: wrap; gap: 6px; }
+  #readout { display: none; }
+  #timebox { order: 1; }
+  #attribution { order: 2; flex-basis: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; pointer-events: auto; cursor: pointer; }
+  #attribution.open { white-space: normal; }
+  #time { width: 110px; }
+  #flight { bottom: calc(max(8px, env(safe-area-inset-bottom)) + 66px); }
 }
 </style>
 </head>
