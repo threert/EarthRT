@@ -255,7 +255,7 @@ describe("terrain", () => {
 
 describe("albedo", () => {
   test("snow line falls toward the poles", () => {
-    expect(snowLine(0)).toBeGreaterThan(snowLine(40));
+    expect(snowLine(30)).toBeGreaterThan(snowLine(50));
     expect(snowLine(40)).toBeGreaterThan(snowLine(65));
   });
   test("forest dark green, desert sand, snow white, deep sea dark blue", () => {

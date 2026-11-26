@@ -77,11 +77,12 @@ function aridity(lat: number, lon: number) {
 /** Altitude of the permanent snow line at a latitude, m. */
 export function snowLine(lat: number) {
   const a = Math.abs(lat);
-  // ~5200 m in the tropics, ~4000 m at 35°, ~2000 m at 55°, sea level by 72° (Antarctica sits on its ice anyway)
-  if (a < 20) return 5200;
-  if (a < 35) return 5200 - (a - 20) * 80;
-  if (a < 55) return 4000 - (a - 35) * 100;
-  return Math.max(0, 2000 - (a - 55) * 118);
+  // ~5100 m in the tropics, ~5800 m in the dry subtropics (Tibet's plateau at 4500-5000 m is brown, its peaks
+  // white), ~2500 m at 55°, sea level by 72°; WorldCover's own snow class covers glaciers and ice caps anyway
+  if (a < 20) return 5100;
+  if (a < 38) return 5100 + Math.min(1, (a - 20) / 8) * 700;
+  if (a < 55) return 5800 - (a - 38) * 195;
+  return Math.max(0, 2500 - (a - 55) * 147);
 }
 
 /**
@@ -111,7 +112,7 @@ export function albedo(cls: number, lat: number, lon: number, h: number, slope: 
     case CLS.bare: {
       // deserts sand-coloured, red in places (Sahara's east, Australia), rock elsewhere and at high latitudes
       const desert = (1 - smooth(42, 52, a)) * (1 - smooth(2500, 4000, h));
-      c = mix(mix(ROCK, ROCK_DARK, n2 * 0.6), mix(SAND, SAND_RED, smooth(0.45, 0.75, fbm(lat, lon, 3, 5))), desert);
+      c = mix(mix(ROCK, ROCK_DARK, n2 * 0.6), mix(SAND, SAND_RED, 0.45 * smooth(0.35, 0.85, fbm(lat, lon, 5, 5))), desert);
       break;
     }
     case CLS.snow: c = SNOW; break;
