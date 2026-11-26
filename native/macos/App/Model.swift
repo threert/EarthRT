@@ -337,6 +337,18 @@ final class Model: ObservableObject {
         }
         Task {
             guard let raw = try? await Registry.raw(id) else { notice = "Could not load \(id) from the registry"; entering = nil; return }
+            // From far away (above the place's enterFrom, or not near it), the map goes to the place first: the traced
+            // view starts where the map then stands (it leaves at once when its camera is above enterFrom).
+            let m = raw["manifest"] as? [String: Any] ?? [:]
+            let a = m["anchor"] as? [String: Any] ?? [:]
+            let enterFrom = (m["enterFrom"] as? NSNumber)?.doubleValue ?? 150
+            let dLat = ((a["lat"] as? NSNumber)?.doubleValue ?? camera.lat) - camera.lat, dLon = ((a["lon"] as? NSNumber)?.doubleValue ?? camera.lon) - camera.lon
+            let dist = hypot(dLat * 111_320, dLon * 111_320 * cos(camera.lat * .pi / 180))
+            if camera.alt - camera.ground > enterFrom * 0.8 || dist > enterFrom {
+                send(["t": "earth.gotoPlace", "id": id])
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                guard entering == id else { return }
+            }
             tracedSend(["t": "traced.open", "place": raw, "camera": cameraJSON, "utc": camera.utc])
             tracedPlace = id
         }
