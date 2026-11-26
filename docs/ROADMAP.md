@@ -32,11 +32,12 @@ Ordered by what the user sees first. Items move up when a picture shows they mat
 2. **The trunk's land.** WorldCover classes everywhere (S2 starts with them); material detail per class (fields,
    forests, rock, snow by slope and height); coasts and rivers from OSM water; terrain finer than z14 where open DEMs
    allow (Japan GSI 5 m, USGS 3DEP 1 m, EU national DEMs).
-3. **Buildings everywhere.** Protomaps extracts region by region (start: the first-party cities' metros, then Japan,
-   the US, Europe, China's east), then the planet; heights from Overture where OSM has none; roof shapes from OSM tags.
-4. **First-party cities**, each a repository and a pose list: Kyoto (S6), Tokyo, New York, Shanghai, San Francisco,
-   Paris, London, Rome, Barcelona, Amsterdam. Done for a city when its poses beat the trunk by eye and its walk-through
-   holds the frame budget.
+3. **Buildings everywhere.** Protomaps extracts region by region (seven metro regions so far; no more until Kyoto is
+   good), then the planet; heights from Overture where OSM has none; roof shapes from OSM tags.
+4. **Kyoto first, and only Kyoto for now** (the user, 2026-11-26: no spreading to other cities until Kyoto is
+   good). `threert/earth-kyoto`, judged at `kyoto-3km`, `kyoto-1km` and closer poses; done when those beat the trunk
+   by eye and a walk-through holds the frame budget. Tokyo, New York, Shanghai, San Francisco and Europe come after,
+   one at a time, on what Kyoto proved.
 5. **Close views.** Street level inside a city place: walking along streets (a walk graph from OSM ways), interiors
    from places, eras (`@meiji`, `@showa`) switched in the place panel.
 6. **Loading.** Web: first picture, bytes per view, memory; HTTP caching, the top pack, workers. App: commit time a
@@ -51,3 +52,4 @@ Ordered by what the user sees first. Items move up when a picture shows they mat
 - 2026-11-26: S2's terrain live at earth.threert.dev (#2); a scene's fallback GLB (#1). The user decided the
   path-traced side is EarthRT's own native app, not a package in the ThreeRT client: ARCHITECTURE § 1a, SPEC §§ 6–7
   (`earth.*` messages, dev mode in the app), S4 split into S4 (the traced globe) and S4n (the app).
+- 2026-11-26: focus on Kyoto (the user): no other cities until Kyoto is good; S6 started (`threert/earth-kyoto`).
