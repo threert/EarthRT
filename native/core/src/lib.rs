@@ -6,7 +6,8 @@
 //! are commands in a channel; what the script posts and what the renderer reports wait in a queue the app polls.
 //!
 //! The host channel (docs/SPEC.md § 6) is answered here, natively, for the families the app lists in `launch.caps`:
-//! - `assets.*`: downloads into the asset root's `cache/` (src/assets.rs), which the app links to its disk cache;
+//! - `assets.*`: downloads into the asset root's `cache/` (the engine's `AssetFetcher`), which the app links to its
+//!   disk cache;
 //! - `net.*`: `net.fetch` for the registry's JSON (src/net.rs);
 //! - `audio.*`: the engine's mixer;
 //! - everything else (the `earth.*` family, `log`s, the script's own) goes to the app.
@@ -26,7 +27,6 @@
 //!   {"t":"rt.snapshot","path","width","height"}                    a snapshot was written
 //!   {"t":"log","level","text"}                                     a console line of the script
 
-pub mod assets;
 pub mod net;
 
 use anyhow::{anyhow, Context, Result};
@@ -38,7 +38,8 @@ use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 use threert_render::host::{launch_message_with_caps, HostServices, InputTracker};
 use threert_render::live::{next_spp, save_bgra, LiveCore, RenderingRequest};
-use threert_render::script::{set_log_sink, GameSession};
+use threert_render::assets::AssetFetcher;
+use threert_render::script::{set_asset_root, set_log_sink, GameSession};
 use threert_render::{audio::Audio, gpu};
 
 /// The room id the script gets (`setup(roomId)`): empty, the launch message carries the parameters.
@@ -110,14 +111,14 @@ pub fn route(m: &Value) -> Route {
 /// The host side of one run of the script: the services (fresh for each reload: dropping the old ones stops their
 /// downloads) and the launch parameters.
 pub struct Host {
-    pub assets: assets::AssetFetcher,
+    pub assets: AssetFetcher,
     pub net: net::NetFetch,
     pub params: Value,
 }
 
 impl Host {
     pub fn new(root: PathBuf, params: Value, agent: ureq::Agent) -> Host {
-        Host { assets: assets::AssetFetcher::new(root).with_agent(agent.clone()), net: net::NetFetch::new(agent), params }
+        Host { assets: AssetFetcher::new(root).with_agent(agent.clone()), net: net::NetFetch::new(agent).with_direct(net::default_agent()), params }
     }
 
     /// The `launch` message for a view of `width` x `height`: the app's parameters (SPEC § 7) and the view's size.
@@ -217,6 +218,8 @@ fn init(a: &Args) -> Result<State> {
     surface.configure(&g.device, &config);
     let agent = net::agent(a.options["proxy"].as_str(), Duration::from_secs(300));
     let host = Host::new(a.root.clone(), a.options["params"].clone(), agent.clone());
+    // (readAsset and preloadModel read under it: the cache the downloads go to, the places in dev mode.)
+    set_asset_root(&a.root);
     let (game, mut core) = GameSession::start(&a.bundle, ROOM, &a.root, g, &a.presets, config.width, config.height)?;
     core.bounces = 4;
     core.set_scale(0.0);

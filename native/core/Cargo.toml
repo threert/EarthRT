@@ -10,17 +10,15 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-threert-render = { path = "../../engine/renderer", default-features = false, features = ["audio"] }
+threert-render = { path = "../../engine/renderer", default-features = false, features = ["audio", "assets"] }
 wgpu = "30"
 bytemuck = "1"
 serde_json = "1"
 anyhow = "1"
-# assets.* and net.fetch (src/assets.rs, src/net.rs): until the engine's own `assets` library module is in the pinned
-# engine (meshy-dev/ThreeRT #283), the core carries a module of the same shape. TLS is rustls with the ring provider
-# and the webpki roots, as the engine's.
+# net.fetch (src/net.rs) on the same HTTP client as the engine's `assets` module (assets.*): ureq on rustls with the
+# ring provider and the webpki roots.
 ureq = { version = "3", default-features = false, features = ["rustls", "gzip"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-sha2 = "0.10"
 
 [profile.release]
 opt-level = 3

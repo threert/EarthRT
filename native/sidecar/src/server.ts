@@ -104,10 +104,12 @@ export class Server {
     this.on("meshy.generate", (m, reply) => this.task("meshy", reply, log => this.meshy(m, log)));
     // ----- GitHub -----
     this.on("github.whoami", (_m, reply) => this.task("github", reply, async () => {
-      const token = this.settings.githubToken ?? await ghToken();
+      const gh = this.settings.githubToken ? null : await ghToken();
+      const token = this.settings.githubToken ?? gh;
       if (!token) return { signedIn: false };
       const user = await whoami(token);
-      return { signedIn: true, via: this.settings.githubToken ? "app" : "gh", user };
+      // (gh's token goes to the app for likes, in memory: it is gh's to keep.)
+      return { signedIn: true, via: gh ? "gh" : "app", user, ...(gh ? { ghToken: gh } : {}) };
     }));
     this.on("github.signin", (m, reply) => this.task("github.signin", reply, async log => {
       const clientId = String(m.clientId ?? this.settings.githubClientId ?? process.env.EARTHRT_GITHUB_CLIENT_ID ?? "");

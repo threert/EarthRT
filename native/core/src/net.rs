@@ -34,6 +34,8 @@ pub fn allowed(url: &str) -> Result<(), String> {
 
 pub struct NetFetch {
     agent: ureq::Agent,
+    /// Without the proxy: a request the proxy could not connect is tried again directly.
+    direct: Option<ureq::Agent>,
     tx: mpsc::Sender<Value>,
     rx: mpsc::Receiver<Value>,
     running: Arc<AtomicUsize>,
@@ -42,7 +44,13 @@ pub struct NetFetch {
 impl NetFetch {
     pub fn new(agent: ureq::Agent) -> NetFetch {
         let (tx, rx) = mpsc::channel();
-        NetFetch { agent, tx, rx, running: Arc::default() }
+        NetFetch { agent, direct: None, tx, rx, running: Arc::default() }
+    }
+
+    /// With a direct agent to fall back on when the (proxied) one cannot connect.
+    pub fn with_direct(mut self, direct: ureq::Agent) -> NetFetch {
+        self.direct = Some(direct);
+        self
     }
 
     fn fetch(&mut self, m: &Value) {
@@ -60,10 +68,16 @@ impl NetFetch {
         let method = m["method"].as_str().unwrap_or("GET").to_uppercase();
         let headers: Vec<(String, String)> = m["headers"].as_object().map(|h| h.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect()).unwrap_or_default();
         let body = m["body"].as_str().map(String::from);
-        let (url, tx, running, agent) = (url.to_string(), self.tx.clone(), self.running.clone(), self.agent.clone());
+        let (url, tx, running, agent, direct) = (url.to_string(), self.tx.clone(), self.running.clone(), self.agent.clone(), self.direct.clone());
         running.fetch_add(1, Ordering::Relaxed);
         let spawned = std::thread::Builder::new().name("earthrt-fetch".into()).spawn(move || {
-            let answer = match request(&agent, &method, &url, &headers, body) {
+            let mut result = request(&agent, &method, &url, &headers, body.clone());
+            if let (Err(e), Some(direct)) = (&result, &direct) {
+                if e.contains("connect") || e.contains("proxy") || e.contains("timeout") {
+                    result = request(direct, &method, &url, &headers, body);
+                }
+            }
+            let answer = match result {
                 Ok((status, body)) => json!({ "t": "net.fetched", "id": id, "status": status, "body": body }),
                 Err(e) => json!({ "t": "net.fetched", "id": id, "status": 0, "body": "", "error": e }),
             };

@@ -11,7 +11,9 @@
 //   earthrt send '<json>'       a host-channel message for the globe (`earth.goto`, `earth.time`, …: SPEC § 6)
 //   earthrt app '<json>'        a request for the app, as tests drive it: app.pointer {u, v, click | button, down},
 //                               app.key {key, hold?}, app.wheel {notches}, app.panel {panel, show}, app.prompt {text},
-//                               app.shot {path} (= shot --window), app.open {url} (an earthrt:// link), app.search {q}
+//                               app.shot {path} (= shot --window), app.open {url} (an earthrt:// link), app.search {q},
+//                               app.select {place}, app.choose {place}, app.fly {from?, to}, app.time {hour}, app.pick {lat, lon},
+//                               app.create {lat, lon, title}, app.click {x, y}, app.window {size?, appearance?}, app.state
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -35,6 +37,21 @@ async function call(path: string, body?: unknown): Promise<any> {
   const json = await response.json();
   if (!response.ok) { console.error(json.error ?? response.statusText); process.exit(1); }
   return json;
+}
+
+/** The window as the screen shows it (`screencapture -l`: needs the display awake and this terminal's Screen
+ *  Recording permission), else composed offscreen by the app (glass and vibrancy come out flat). */
+async function windowShot(path: string): Promise<{ path: string; width: number; height: number }> {
+  const w = await call("/api/app", { t: "app.window" });
+  if (w.number) {
+    const r = Bun.spawnSync(["screencapture", "-x", "-o", "-l", String(w.number), path]);
+    if (r.exitCode === 0 && Bun.file(path).size > 50_000) {
+      const size = Bun.spawnSync(["sips", "-g", "pixelWidth", "-g", "pixelHeight", path]).stdout.toString();
+      const n = (k: string) => Number(new RegExp(`${k}: (\\d+)`).exec(size)?.[1] ?? 0);
+      return { path, width: n("pixelWidth"), height: n("pixelHeight") };
+    }
+  }
+  return call("/api/app", { t: "app.shot", path });
 }
 
 const flag = (k: string) => (args.includes(k) ? args[args.indexOf(k) + 1] : undefined);
@@ -66,7 +83,7 @@ switch (command) {
       try { camera = JSON.parse(flag("--camera")!); } catch { console.error("--camera takes JSON: '{\"position\":[0,1.6,8],\"target\":[0,1,0]}'"); process.exit(1); }
     }
     const r = args.includes("--window")
-      ? await call("/api/app", { t: "app.shot", path: resolve(file ?? `shot-window-${Date.now()}.png`) })
+      ? await windowShot(resolve(file ?? `shot-window-${Date.now()}.png`))
       : await call("/api/shot", { ...(file ? { path: resolve(file) } : {}), ...(camera ? { camera } : {}), place: !args.includes("--here") });
     console.log(`${r.path} (${r.width}x${r.height})`);
     break;
