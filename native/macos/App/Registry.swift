@@ -139,6 +139,9 @@ struct City: Identifiable, Hashable {
         City(id: "grand-canyon", name: "Grand Canyon", country: "United States", lat: 36.1069, lon: -112.1129, alt: 9000),
     ]
 
+    /// The cities the globe's script knows by name (its flights' ends).
+    static let named: Set<String> = ["kyoto", "tokyo", "san-francisco", "new-york", "shanghai", "paris", "london"]
+
     static func find(_ text: String) -> [City] {
         let t = text.trimmingCharacters(in: .whitespaces).lowercased()
         guard !t.isEmpty else { return all }

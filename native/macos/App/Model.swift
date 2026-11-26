@@ -316,6 +316,20 @@ final class Model: ObservableObject {
 
     func stopFlight() { send(["t": "earth.stop"]) }
 
+    /// The flight's speed: the globe's own keys (`,` halves it, `.` doubles it), until a message for it exists.
+    func flightSpeed(_ target: Double) {
+        var k = max(flight.speedup, 1)
+        var presses: [String] = []
+        while k * 2 <= target * 1.42 { k *= 2; presses.append("Period") }
+        while k / 2 >= target / 1.42 { k /= 2; presses.append("Comma") }
+        for (i, key) in presses.prefix(12).enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.15) { [weak self] in
+                self?.view.key(key, down: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.07) { self?.view.key(key, down: false) }
+            }
+        }
+    }
+
     func setTime(hour: Double?) {
         if let hour {
             solarHour = hour

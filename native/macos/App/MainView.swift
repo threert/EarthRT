@@ -231,6 +231,10 @@ struct FlightCard: View {
                 ProgressView(value: f.progress)
             }
             .frame(width: 320)
+            Menu {
+                ForEach([10.0, 30, 60, 120, 300, 1000], id: \.self) { k in Button("\(Int(k))× real time") { model.flightSpeed(k) } }
+            } label: { Text("\(Int(f.speedup.rounded()))×").monospacedDigit() }
+            .menuStyle(.borderlessButton).fixedSize().help("How fast the flight goes (or scroll over the globe)")
             Button { model.downloadFlight() } label: { Image(systemName: "arrow.down.circle") }.buttonStyle(.borderless).help("Download this flight for offline use")
             Button("Stop") { model.stopFlight() }.keyboardShortcut(".", modifiers: .command)
         }
@@ -325,7 +329,9 @@ struct FlightPicker: View {
     private func d(_ c: City) -> Double { hypot(c.lat - model.camera.lat, c.lon - model.camera.lon) }
     private func end(_ id: String) -> Any? {
         if id == "here" { return nil }
-        if let c = City.all.first(where: { $0.id == id }) { return ["lat": c.lat, "lon": c.lon, "alt": 1500] as [String: Any] }
+        // (The globe knows these cities by name and titles the flight with it; others go as points with a title.)
+        if City.named.contains(id) { return id }
+        if let c = City.all.first(where: { $0.id == id }) { return ["lat": c.lat, "lon": c.lon, "alt": 1500, "title": c.name] as [String: Any] }
         return id
     }
 }

@@ -25,7 +25,7 @@ enum Paths {
     /// The sidecar's build folder (its server file, the agents' adapters, the `earthrt` launcher). A packaged app's
     /// Resources are read-only: it keeps them in Application Support.
     static var build: String {
-        if FileManager.default.isWritableFile(atPath: root + "/native") { return root + "/native/.build" }
+        if !root.hasPrefix(Bundle.main.bundlePath) { return root + "/native/.build" }
         return support + "/sidecar"
     }
 
